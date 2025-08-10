@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #__next {
+  height: 100%;
+}
+body {
+  @apply bg-gray-50 text-gray-900;
+}
+
+.card {
+  @apply bg-white rounded-xl shadow-sm border border-gray-200;
+}
+.btn {
+  @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium transition-colors;
+}
+.btn-primary {
+  @apply bg-brand text-white hover:bg-brand-dark;
+}
+.btn-secondary {
+  @apply bg-gray-100 hover:bg-gray-200;
+}
+

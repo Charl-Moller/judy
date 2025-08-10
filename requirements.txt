@@ -1,0 +1,12 @@
+fastapi==0.112.0
+uvicorn==0.30.5
+SQLAlchemy==2.0.32
+psycopg2-binary==2.9.9
+pydantic==2.8.2
+pydantic-settings==2.4.0
+openai==1.42.0
+azure-search-documents==11.5.3
+azure-core==1.30.2
+azure-storage-blob==12.20.0
+python-multipart==0.0.9
+python-dotenv==1.1.1

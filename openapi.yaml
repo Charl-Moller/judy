@@ -1,0 +1,126 @@
+openapi: 3.0.3
+info:
+  title: Multi-Agent AI Assistant API
+  version: 1.0.0
+  description: Backend API for chat, agent management, file uploads, and orchestration.
+servers:
+  - url: /api
+paths:
+  /chat:
+    post:
+      summary: Send a chat message or file to the orchestrator
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                message:
+                  type: string
+                files:
+                  type: array
+                  items:
+                    type: string
+                    description: File IDs
+                agent_id:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: Chat response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  response:
+                    type: string
+                  attachments:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type: 
+                          type: string
+                        url:
+                          type: string
+
+  /agents:
+    get:
+      summary: List all agents
+    post:
+      summary: Create a new agent
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                llm_config_id: { type: string, format: uuid }
+                capabilities:
+                  type: array
+                  items: { type: string, format: uuid }
+                rag_indexes:
+                  type: array
+                  items: { type: string, format: uuid }
+    put:
+      summary: Bulk update or upsert list of agents
+
+  /agents/{id}:
+    get:
+      summary: Get an agent by ID
+    put:
+      summary: Update an agent by ID
+    delete:
+      summary: Delete an agent by ID
+
+  /llm-configs:
+    get:
+      summary: List LLM configs
+    post:
+      summary: Create new LLM config
+
+  /capabilities:
+    get:
+      summary: List capabilities
+    post:
+      summary: Add a new capability
+
+  /rag-indexes:
+    get:
+      summary: List RAG indexes
+    post:
+      summary: Register a new RAG index
+
+  /files:
+    post:
+      summary: Upload a file to Azure Blob Storage
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Uploaded file info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  file_id: { type: string }
+                  url: { type: string }
+
+  /files/{id}:
+    get:
+      summary: Retrieve a file or its metadata
