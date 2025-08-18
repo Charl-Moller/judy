@@ -49,3 +49,121 @@ class AgentOut(AgentBase):
     llm_config: Optional[LLMConfigRef]
     capabilities: Optional[List[CapabilityRef]]
     rag_indexes: Optional[List[RAGIndexRef]]
+
+
+# ============================================================================
+# AGENT BUILDER SCHEMAS (for visual agent builder)
+# ============================================================================
+
+class AgentNode(BaseModel):
+    """Agent node schema for visual builder"""
+    id: str
+    type: str
+    position: dict
+    data: dict
+
+class AgentConnection(BaseModel):
+    """Agent connection schema for visual builder"""
+    id: str
+    source: str
+    target: str
+    sourceHandle: Optional[str] = None
+    targetHandle: Optional[str] = None
+    type: str = "data"
+    dataType: Optional[str] = None
+
+class AgentBuilderCreate(BaseModel):
+    """Schema for creating a new visual agent"""
+    name: str
+    description: Optional[str] = None
+    version: str = "1.0.0"
+    nodes: List[AgentNode]
+    connections: List[AgentConnection]
+    agent_metadata: Optional[dict] = {}
+    tags: Optional[List[str]] = []
+    owner_id: Optional[str] = None
+    is_public: bool = False
+    status: str = "draft"
+    is_template: bool = False
+
+class AgentBuilderUpdate(BaseModel):
+    """Schema for updating a visual agent"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    version: Optional[str] = None
+    nodes: Optional[List[AgentNode]] = None
+    connections: Optional[List[AgentConnection]] = None
+    agent_metadata: Optional[dict] = None
+    tags: Optional[List[str]] = None
+    is_public: Optional[bool] = None
+    status: Optional[str] = None
+    is_template: Optional[bool] = None
+
+class AgentBuilderResponse(BaseSchema):
+    """Schema for visual agent response"""
+    id: UUID
+    name: str
+    description: Optional[str]
+    version: str
+    nodes: List[AgentNode]
+    connections: List[AgentConnection]
+    agent_metadata: dict
+    tags: List[str]
+    owner_id: Optional[str]
+    is_public: bool
+    status: str
+    is_template: bool
+    created_at: datetime
+    updated_at: datetime
+    last_executed_at: Optional[datetime]
+    execution_count: int
+    success_count: int
+    failure_count: int
+    avg_execution_time: Optional[int]
+
+class AgentBuilderListResponse(BaseModel):
+    """Schema for visual agent list response"""
+    agents: List[AgentBuilderResponse]
+    total: int
+    skip: int
+    limit: int
+
+class AgentExecutionCreate(BaseModel):
+    """Schema for creating an agent execution"""
+    session_id: str
+    input_data: Optional[dict] = None
+    conversation_history: Optional[List[dict]] = None
+    memory_context: Optional[dict] = None
+
+class AgentExecutionResponse(BaseSchema):
+    """Schema for agent execution response"""
+    id: UUID
+    agent_id: UUID
+    session_id: str
+    input_data: Optional[dict]
+    output_data: Optional[dict]
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime]
+    error_message: Optional[str]
+    execution_time_ms: Optional[int]
+    memory_usage_mb: Optional[int]
+    conversation_history: Optional[List[dict]]
+    memory_context: Optional[dict]
+
+class AgentTemplateResponse(BaseSchema):
+    """Schema for agent template response"""
+    id: UUID
+    name: str
+    description: Optional[str]
+    category: str
+    nodes: List[AgentNode]
+    connections: List[AgentConnection]
+    template_metadata: dict
+    usage_count: int
+    rating: int
+    rating_count: int
+    is_public: bool
+    created_by: Optional[str]
+    created_at: datetime
+    updated_at: datetime

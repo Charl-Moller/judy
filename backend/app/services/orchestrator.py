@@ -241,15 +241,21 @@ def execute_single_agent(agent, message, files, prev_output):
         if secret_ref:
             # Check if it's an Azure Key Vault reference
             if secret_ref.startswith("https://") and ".vault.azure.net/" in secret_ref:
-                try:
-                    api_key = resolve_azure_keyvault_secret(secret_ref)
-                    print(f"Successfully resolved Key Vault secret for agent {agent.name}")
-                except Exception as e:
-                    print(f"Failed to resolve Key Vault secret: {e}")
-                    # Fall back to environment variable
+                if not AZURE_KEYVAULT_AVAILABLE:
+                    # Key Vault client not available
                     api_key = settings.AZURE_OPENAI_API_KEY
                     if not api_key:
-                        return {"response": f"[Key Vault resolution failed] {str(e)}. Please check Key Vault configuration or set AZURE_OPENAI_API_KEY environment variable.", "attachments": prev_output.get("attachments", []), "tool_calls": []}
+                        return {"response": f"[Key Vault integration not available] Your LLM configuration uses Azure Key Vault to store the API key ({secret_ref}), but the required libraries are not installed.\n\nTo fix this, choose one of these options:\n\n1. **Install Azure Key Vault libraries:**\n   ```\n   pip install azure-keyvault-secrets azure-identity\n   ```\n\n2. **Set environment variable:**\n   Add your Azure OpenAI API key to the .env file:\n   ```\n   AZURE_OPENAI_API_KEY=your_actual_api_key_here\n   ```\n\n3. **Update LLM config:**\n   Edit your LLM configuration to store the API key directly instead of using Key Vault.", "attachments": prev_output.get("attachments", []), "tool_calls": []}
+                else:
+                    try:
+                        api_key = resolve_azure_keyvault_secret(secret_ref)
+                        print(f"Successfully resolved Key Vault secret for agent {agent.name}")
+                    except Exception as e:
+                        print(f"Failed to resolve Key Vault secret: {e}")
+                        # Fall back to environment variable
+                        api_key = settings.AZURE_OPENAI_API_KEY
+                        if not api_key:
+                            return {"response": f"[Key Vault resolution failed] {str(e)}. Please check Key Vault configuration or set AZURE_OPENAI_API_KEY environment variable.", "attachments": prev_output.get("attachments", []), "tool_calls": []}
             # Check if it looks like a secret reference (starts with "secret://")
             elif secret_ref.startswith("secret://"):
                 # This is a proper secret reference - would need Azure Key Vault resolution
@@ -534,16 +540,23 @@ async def execute_single_agent_stream(agent, message, files, prev_output):
         if secret_ref:
             # Check if it's an Azure Key Vault reference
             if secret_ref.startswith("https://") and ".vault.azure.net/" in secret_ref:
-                try:
-                    api_key = resolve_azure_keyvault_secret(secret_ref)
-                    print(f"Successfully resolved Key Vault secret for agent {agent.name}")
-                except Exception as e:
-                    print(f"Failed to resolve Key Vault secret: {e}")
-                    # Fall back to environment variable
+                if not AZURE_KEYVAULT_AVAILABLE:
+                    # Key Vault client not available
                     api_key = settings.AZURE_OPENAI_API_KEY
                     if not api_key:
-                        yield f"Secret resolution not implemented. Please set AZURE_OPENAI_API_KEY environment variable or implement Azure Key Vault integration for {secret_ref}"
+                        yield f"[Key Vault integration not available] Your LLM configuration uses Azure Key Vault to store the API key ({secret_ref}), but the required libraries are not installed.\n\nTo fix this, choose one of these options:\n\n1. Install Azure Key Vault libraries: pip install azure-keyvault-secrets azure-identity\n\n2. Set environment variable: Add AZURE_OPENAI_API_KEY=your_actual_api_key to .env file\n\n3. Update LLM config to store the API key directly instead of using Key Vault."
                         return
+                else:
+                    try:
+                        api_key = resolve_azure_keyvault_secret(secret_ref)
+                        print(f"Successfully resolved Key Vault secret for agent {agent.name}")
+                    except Exception as e:
+                        print(f"Failed to resolve Key Vault secret: {e}")
+                        # Fall back to environment variable
+                        api_key = settings.AZURE_OPENAI_API_KEY
+                        if not api_key:
+                            yield f"[Key Vault resolution failed] {str(e)}. Please check Key Vault configuration or set AZURE_OPENAI_API_KEY environment variable."
+                            return
             # Check if it looks like a secret reference (starts with "secret://")
             elif secret_ref.startswith("secret://"):
                 # This is a proper secret reference - would need Azure Key Vault resolution

@@ -251,3 +251,103 @@ class WorkflowTemplate(Base):
 
 # Add back-reference relationships
 Workflow.executions = relationship("WorkflowExecution", back_populates="workflow")
+
+
+# ============================================================================
+# AGENT BUILDER STORAGE MODELS
+# ============================================================================
+
+class AgentBuilder(Base):
+    __tablename__ = "agent_builders"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    version = Column(String, default="1.0.0")
+    
+    # Agent graph data (JSONB for PostgreSQL performance)
+    nodes = Column(JSON, nullable=False)  # Array of agent nodes
+    connections = Column(JSON, nullable=False)  # Array of agent connections
+    
+    # Metadata
+    agent_metadata = Column(JSON, default=dict)  # Additional agent metadata
+    tags = Column(JSON, default=list)  # Agent tags for organization
+    
+    # Ownership and access control
+    owner_id = Column(String, nullable=True)  # Azure AD user ID or email
+    is_public = Column(Boolean, default=False)  # Public agents can be viewed by others
+    
+    # Status and lifecycle
+    status = Column(String, default="draft")  # draft, active, archived, deleted
+    is_template = Column(Boolean, default=False)  # Can be used as template for new agents
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_executed_at = Column(DateTime, nullable=True)
+    
+    # Execution statistics
+    execution_count = Column(Integer, default=0)
+    success_count = Column(Integer, default=0)
+    failure_count = Column(Integer, default=0)
+    avg_execution_time = Column(Integer, nullable=True)  # in milliseconds
+
+
+class AgentExecution(Base):
+    __tablename__ = "agent_executions"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_id = Column(UUID(as_uuid=True), ForeignKey("agent_builders.id"), nullable=False)
+    
+    # Execution details
+    session_id = Column(String, nullable=False)  # Unique execution session
+    input_data = Column(JSON, nullable=True)  # Input data for the agent
+    output_data = Column(JSON, nullable=True)  # Output data from the agent
+    
+    # Execution status
+    status = Column(String, default="running")  # running, completed, failed, cancelled
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Performance metrics
+    execution_time_ms = Column(Integer, nullable=True)  # Total execution time
+    memory_usage_mb = Column(Integer, nullable=True)  # Memory usage during execution
+    
+    # Memory context
+    conversation_history = Column(JSON, nullable=True)  # Conversation history for memory
+    memory_context = Column(JSON, nullable=True)  # Additional memory context
+    
+    # Relationships
+    agent = relationship("AgentBuilder", back_populates="executions")
+
+
+class AgentTemplate(Base):
+    __tablename__ = "agent_templates"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    category = Column(String, default="general")  # ai_chat, data_processing, image_analysis, etc.
+    
+    # Template data
+    nodes = Column(JSON, nullable=False)  # Template node structure
+    connections = Column(JSON, nullable=False)  # Template connection structure
+    template_metadata = Column(JSON, default=dict)  # Template metadata
+    
+    # Usage statistics
+    usage_count = Column(Integer, default=0)
+    rating = Column(Integer, default=0)  # 1-5 rating
+    rating_count = Column(Integer, default=0)
+    
+    # Access control
+    is_public = Column(Boolean, default=True)
+    created_by = Column(String, nullable=True)  # Creator's user ID
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# Add back-reference relationships for agent builder
+AgentBuilder.executions = relationship("AgentExecution", back_populates="agent")

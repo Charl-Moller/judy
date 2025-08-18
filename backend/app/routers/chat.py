@@ -73,16 +73,24 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
             status=models.AgentStatus.active
         )
         
-        # Create a temporary LLM config from the workflow node
-        temp_llm_config = models.LLMConfig(
-            id=uuid.uuid4(),
-            provider=llm_node.get("data", {}).get("provider", "Azure OpenAI"),
-            model_name=llm_node.get("data", {}).get("model", "gpt-4"),
-            temperature=str(llm_node.get("data", {}).get("temperature", 0.7)),
-            max_tokens=str(llm_node.get("data", {}).get("maxTokens", 4000)),
-            api_base=llm_node.get("data", {}).get("apiBase", ""),
-            api_key_secret_ref=llm_node.get("data", {}).get("apiKeySecretRef", "")
-        )
+        # Create LLM config - check for saved config first
+        saved_config_id = llm_node.get("data", {}).get("savedConfigId")
+        if saved_config_id:
+            # Use saved LLM config from database
+            temp_llm_config = db.query(models.LLMConfig).filter(models.LLMConfig.id == saved_config_id).first()
+            if not temp_llm_config:
+                raise HTTPException(status_code=400, detail=f"Saved LLM config {saved_config_id} not found")
+        else:
+            # Create a temporary LLM config from the workflow node data
+            temp_llm_config = models.LLMConfig(
+                id=uuid.uuid4(),
+                provider=llm_node.get("data", {}).get("provider", "Azure OpenAI"),
+                model_name=llm_node.get("data", {}).get("model", "gpt-4"),
+                temperature=str(llm_node.get("data", {}).get("temperature", 0.7)),
+                max_tokens=str(llm_node.get("data", {}).get("maxTokens", 4000)),
+                api_base=llm_node.get("data", {}).get("apiBase", ""),
+                api_key_secret_ref=llm_node.get("data", {}).get("apiKeySecretRef", "")
+            )
         
         # Link the agent to the LLM config
         temp_agent.llm_config = temp_llm_config
@@ -228,16 +236,24 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
             status=models.AgentStatus.active
         )
         
-        # Create a temporary LLM config from the workflow node
-        temp_llm_config = models.LLMConfig(
-            id=uuid.uuid4(),
-            provider=llm_node.get("data", {}).get("provider", "Azure OpenAI"),
-            model_name=llm_node.get("data", {}).get("model", "gpt-4"),
-            temperature=str(llm_node.get("data", {}).get("temperature", 0.7)),
-            max_tokens=str(llm_node.get("data", {}).get("maxTokens", 4000)),
-            api_base=llm_node.get("data", {}).get("apiBase", ""),
-            api_key_secret_ref=llm_node.get("data", {}).get("apiKeySecretRef", "")
-        )
+        # Create LLM config - check for saved config first
+        saved_config_id = llm_node.get("data", {}).get("savedConfigId")
+        if saved_config_id:
+            # Use saved LLM config from database
+            temp_llm_config = db.query(models.LLMConfig).filter(models.LLMConfig.id == saved_config_id).first()
+            if not temp_llm_config:
+                raise HTTPException(status_code=400, detail=f"Saved LLM config {saved_config_id} not found")
+        else:
+            # Create a temporary LLM config from the workflow node data
+            temp_llm_config = models.LLMConfig(
+                id=uuid.uuid4(),
+                provider=llm_node.get("data", {}).get("provider", "Azure OpenAI"),
+                model_name=llm_node.get("data", {}).get("model", "gpt-4"),
+                temperature=str(llm_node.get("data", {}).get("temperature", 0.7)),
+                max_tokens=str(llm_node.get("data", {}).get("maxTokens", 4000)),
+                api_base=llm_node.get("data", {}).get("apiBase", ""),
+                api_key_secret_ref=llm_node.get("data", {}).get("apiKeySecretRef", "")
+            )
         
         # Link the agent to the LLM config
         temp_agent.llm_config = temp_llm_config
