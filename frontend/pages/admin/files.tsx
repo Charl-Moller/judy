@@ -144,7 +144,7 @@ export default function FilesPage() {
         </table>
         {files.length === 0 && (
           <div className="p-8 text-center text-gray-500">
-            No files uploaded yet. Click "Upload File" to get started.
+            No files uploaded yet. Click &quot;Upload File&quot; to get started.
           </div>
         )}
       </div>

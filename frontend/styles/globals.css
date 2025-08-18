@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Grid pattern for workflow editor */
+.bg-grid-pattern {
+  background-image: 
+    linear-gradient(rgba(0, 0, 0, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Button styles for workflow editor */
+.btn {
+  @apply px-4 py-2 rounded-md font-medium transition-colors duration-200;
+}
+
+.btn-primary {
+  @apply bg-blue-600 text-white hover:bg-blue-700;
+}
+
+.btn-secondary {
+  @apply bg-gray-200 text-gray-800 hover:bg-gray-300;
+}
+
+.btn-success {
+  @apply bg-green-600 text-white hover:bg-green-700;
+}
+
+.btn-sm {
+  @apply px-3 py-1.5 text-sm;
+}
+
+/* Card styles */
+.card {
+  @apply bg-white border border-gray-200 rounded-lg shadow-sm;
+}
+
 html, body, #__next {
   height: 100%;
 }
@@ -15,10 +49,19 @@ body {
 .btn {
   @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium transition-colors;
 }
+.btn-sm {
+  @apply px-3 py-1.5 text-sm;
+}
 .btn-primary {
   @apply bg-brand text-white hover:bg-brand-dark;
 }
 .btn-secondary {
   @apply bg-gray-100 hover:bg-gray-200;
+}
+.btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700;
+}
+.btn-info {
+  @apply bg-blue-600 text-white hover:bg-blue-700;
 }
 

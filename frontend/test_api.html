@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>API Test</h1>
+    <div id="results"></div>
+    
+    <script>
+        const apiBase = 'http://localhost:8000';
+        const resultsDiv = document.getElementById('results');
+        
+        async function testAPI() {
+            try {
+                // Test agents endpoint
+                const agentsRes = await fetch(`${apiBase}/agents`);
+                const agentsData = await agentsRes.json();
+                console.log('Agents:', agentsData);
+                
+                // Test capabilities endpoint
+                const capabilitiesRes = await fetch(`${apiBase}/capabilities`);
+                const capabilitiesData = await capabilitiesRes.json();
+                console.log('Capabilities:', capabilitiesData);
+                
+                // Test LLM configs endpoint
+                const llmRes = await fetch(`${apiBase}/llm-configs`);
+                const llmData = await llmRes.json();
+                console.log('LLM Configs:', llmData);
+                
+                // Test orchestrator endpoint
+                const orchestratorRes = await fetch(`${apiBase}/orchestrator`);
+                const orchestratorData = await orchestratorRes.json();
+                console.log('Orchestrator:', orchestratorData);
+                
+                resultsDiv.innerHTML = `
+                    <h2>API Test Results:</h2>
+                    <p><strong>Agents:</strong> ${agentsData.length} found</p>
+                    <p><strong>Capabilities:</strong> ${capabilitiesData.length} found</p>
+                    <p><strong>LLM Configs:</strong> ${llmData.length} found</p>
+                    <p><strong>Orchestrator Configs:</strong> ${orchestratorData.length} found</p>
+                    <p><strong>Status:</strong> All endpoints working!</p>
+                `;
+                
+            } catch (error) {
+                console.error('API Test Error:', error);
+                resultsDiv.innerHTML = `
+                    <h2>API Test Error:</h2>
+                    <p style="color: red;">${error.message}</p>
+                `;
+            }
+        }
+        
+        testAPI();
+    </script>
+</body>
+</html>
