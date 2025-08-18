@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
-import WorkflowEditor from '../../components/WorkflowEditor'
+import { useRouter } from 'next/router'
 
 // Example workflows defined outside component to avoid recreation
 const EXAMPLE_WORKFLOWS = [
@@ -197,9 +197,8 @@ const EXAMPLE_WORKFLOWS = [
 ]
 
 export default function WorkflowsPage() {
-  const [showEditor, setShowEditor] = useState(false)
+  const router = useRouter()
   const [savedWorkflows, setSavedWorkflows] = useState<any[]>([])
-  const [currentWorkflow, setCurrentWorkflow] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null)
   const [editingWorkflowName, setEditingWorkflowName] = useState('')
@@ -345,63 +344,85 @@ export default function WorkflowsPage() {
     }
   }
 
-  const openWorkflow = (workflow: any) => {
-    console.log('🔍 openWorkflow called with:')
-    console.log('  - workflow:', workflow)
-    console.log('  - workflow.id:', workflow.id)
-    console.log('  - workflow.name:', workflow.name)
-    setCurrentWorkflow(workflow)
-    setShowEditor(true)
+  const migrateWorkflow = (workflow: any) => {
+    console.log('🔄 Migrating workflow to Agent Builder:', workflow)
+    
+    // Convert workflow to agent format and redirect
+    const agentData = {
+      ...workflow,
+      // Ensure it has agent metadata
+      name: workflow.name || workflow.metadata?.name || 'Migrated Agent',
+      description: workflow.description || workflow.metadata?.description || 'Migrated from legacy workflow',
+      // Preserve nodes and connections as-is since they're already compatible
+      nodes: workflow.nodes || [],
+      connections: workflow.connections || [],
+      // Add migration flag
+      migratedFrom: 'workflow',
+      created_at: workflow.created_at || new Date().toISOString()
+    }
+    
+    // Store in sessionStorage for the agent-builder page
+    sessionStorage.setItem('importAgent', JSON.stringify(agentData))
+    
+    // Redirect to agent builder
+    router.push('/admin/agent-builder')
   }
 
-  if (showEditor) {
-    return (
-      <div className="h-screen">
-        <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => setShowEditor(false)}
-              className="btn btn-secondary"
+  const openWorkflow = (workflow: any) => {
+    // Show migration prompt
+    if (confirm(`This workflow will be opened in the new Agent Builder.\n\nThe Agent Builder provides the same functionality with enhanced visual capabilities.\n\nContinue?`)) {
+      migrateWorkflow(workflow)
+    }
+  }
+
+  // Migration notice
+  const MigrationNotice = () => (
+    <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+      <div className="flex items-start">
+        <div className="text-blue-600 mr-3 text-xl">ℹ️</div>
+        <div>
+          <h3 className="font-semibold text-blue-900 mb-2">Workflow Migration</h3>
+          <p className="text-blue-800 text-sm mb-3">
+            All workflows have been upgraded to use the new Agent Builder with enhanced visual capabilities. 
+            You can continue to browse and migrate existing workflows here.
+          </p>
+          <div className="flex gap-2">
+            <Link href="/admin/agent-builder" className="btn btn-primary btn-sm">
+              Open Agent Builder
+            </Link>
+            <button 
+              onClick={() => {
+                const confirmed = confirm('This will migrate ALL workflows to the Agent Builder format. Continue?')
+                if (confirmed) {
+                  savedWorkflows.forEach(workflow => migrateWorkflow(workflow))
+                }
+              }}
+              className="btn btn-secondary btn-sm"
             >
-              ← Back to Workflows
+              Migrate All Workflows
             </button>
-            <h1 className="text-xl font-semibold text-gray-900">
-              {currentWorkflow ? `Editing: ${currentWorkflow.name}` : 'New Workflow'}
-            </h1>
           </div>
         </div>
-        
-        <WorkflowEditor
-          onSave={handleSaveWorkflow}
-          onExecute={handleExecuteWorkflow}
-          initialWorkflow={currentWorkflow}
-        />
       </div>
-    )
-  }
+    </div>
+  )
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">AI Workflows</h1>
+          <h1 className="text-3xl font-bold text-gray-900">Legacy Workflows</h1>
           <p className="mt-2 text-gray-600">
-            Design and orchestrate AI agent workflows with a visual editor
+            Browse and migrate existing workflows to the new Agent Builder
           </p>
         </div>
         <div className="flex items-center space-x-3">
           <Link href="/admin" className="btn btn-secondary">
             Back to Admin
           </Link>
-          <button
-            onClick={() => {
-              setCurrentWorkflow(null)
-              setShowEditor(true)
-            }}
-            className="btn btn-primary"
-          >
-            Create New Workflow
-          </button>
+          <Link href="/admin/agent-builder" className="btn btn-primary">
+            Create New Agent
+          </Link>
           <button
             onClick={() => loadWorkflows()}
             className="btn btn-secondary"
@@ -411,6 +432,8 @@ export default function WorkflowsPage() {
           </button>
         </div>
       </div>
+
+      <MigrationNotice />
 
       {/* Workflow Overview */}
       <div className="grid md:grid-cols-3 gap-6 mb-8">
@@ -449,17 +472,11 @@ export default function WorkflowsPage() {
             <div className="text-gray-400 text-6xl mb-4">🎯</div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">No workflows yet</h3>
             <p className="text-gray-600 mb-6">
-              Create your first AI workflow to start orchestrating agents, tools, and memory systems
+              Start building agents in the new Agent Builder with enhanced visual capabilities
             </p>
-            <button
-              onClick={() => {
-                setCurrentWorkflow(null)
-                setShowEditor(true)
-              }}
-              className="btn btn-primary"
-            >
-              Create Your First Workflow
-            </button>
+            <Link href="/admin/agent-builder" className="btn btn-primary">
+              Open Agent Builder
+            </Link>
           </div>
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -615,12 +632,21 @@ export default function WorkflowsPage() {
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-gray-200">
-                  <button
-                    onClick={() => openWorkflow(workflow)}
-                    className="w-full btn btn-secondary btn-sm"
-                  >
-                    Open Workflow
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openWorkflow(workflow)}
+                      className="flex-1 btn btn-primary btn-sm"
+                    >
+                      🔄 Migrate to Agent Builder
+                    </button>
+                    <button
+                      onClick={() => deleteWorkflow(workflow.id)}
+                      className="px-2 btn-sm text-red-600 hover:text-red-800"
+                      title="Delete workflow"
+                    >
+                      🗑️
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

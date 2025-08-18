@@ -5,7 +5,8 @@ export default function AdminHome() {
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
       <h1 className="text-2xl font-semibold">Admin</h1>
       <div className="grid md:grid-cols-3 gap-4">
-        <AdminCard title="AI Workflows" href="/admin/workflows" description="Visual workflow editor for AI agent orchestration"/>
+        <AdminCard title="🤖 Agent Builder" href="/admin/agent-builder" description="Visual drag-and-drop AI agent designer with complete workflow capabilities"/>
+        <AdminCard title="🎨 AI Workflows" href="/admin/workflows" description="Legacy workflow browser and migration tools"/>
         <AdminCard title="Relationship Dashboard" href="/admin/relationships" description="Visualize and manage orchestrator, agents, LLMs, and tools connections"/>
         <AdminCard title="Orchestrator" href="/admin/orchestrator" description="Intelligent routing and coordination system"/>
         <AdminCard title="Agents" href="/admin/agents" description="Create and manage agents"/>
