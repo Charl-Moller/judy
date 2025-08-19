@@ -32,6 +32,7 @@ import { ExecutionProvider } from '../../context/ExecutionContext'
 const nodeTypes = {
   custom: AgentNode,
   agent: AgentNode,
+  persona_router: AgentNode,
   llm: AgentNode,
   tool: AgentNode,
   memory: AgentNode,
@@ -51,10 +52,11 @@ interface AgentCanvasProps {
   height?: string
   onSave?: (agent: any) => void
   onExecute?: (agent: any) => void
+  onBack?: () => void
   initialAgent?: any
 }
 
-const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, initialAgent }) => {
+const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, initialAgent }) => {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const { setReactFlowInstance, reactFlowInstance } = useFlow()
   const { isConfigOpen } = useNodeConfig()
@@ -189,13 +191,26 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, initialAge
               parameters: {},
               enabled: true
             }
+          case 'persona_router':
+            return {
+              ...baseData,
+              name: 'Persona Router',
+              description: 'Routes user input to appropriate connected agents',
+              intents: {
+                method: 'hybrid',
+                confidenceThreshold: 0.7
+              },
+              agentIntentMappings: {},
+              // Legacy personas field removed - now uses connected agents
+            }
           case 'memory':
             return {
               ...baseData,
-              type: 'vector',
-              maxSize: 1000,
-              similarity: 0.8,
-              retention: '7d'
+              type: 'conversation',
+              conversation: {
+                windowSize: 10,
+                includeSystem: false
+              }
             }
           case 'trigger':
             return {
@@ -312,13 +327,26 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, initialAge
   }, [reactFlowInstance, initialAgent, onExecute])
 
   return (
-    <Box sx={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ 
+      width: '100%', 
+      height: '100%', 
+      maxHeight: '100vh', 
+      display: 'flex', 
+      flexDirection: 'column',
+      overflow: 'hidden'
+    }}>
       <AgentCanvasHeader 
         agentName={initialAgent?.name || 'New Agent'}
         onSave={handleSave}
         onExecute={handleExecute}
+        onBack={onBack}
       />
-      <Box sx={{ display: 'flex', flex: 1, position: 'relative' }}>
+      <Box sx={{ 
+        display: 'flex', 
+        flex: 1, 
+        position: 'relative',
+        minHeight: 0 // Important: allows flex items to shrink below content size
+      }}>
         <AgentPalette />
         <Box 
           ref={reactFlowWrapper} 

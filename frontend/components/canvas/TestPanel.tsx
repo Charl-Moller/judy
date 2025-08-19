@@ -34,6 +34,7 @@ import {
 } from '@mui/icons-material'
 import { useExecution } from '../../context/ExecutionContext'
 import { useFlow } from '../../context/FlowContext'
+import MessageRenderer from '../MessageRenderer'
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -242,6 +243,21 @@ const TestPanel: React.FC = () => {
 
           const result = await response.json()
           
+          // Log agent information if available
+          if (result.workflow_execution?.agent_name) {
+            addLog({
+              level: 'info',
+              message: `🤖 Response from Agent: ${result.workflow_execution.agent_name}`
+            })
+            
+            if (result.workflow_execution.router_used) {
+              addLog({
+                level: 'info',
+                message: `🎭 Persona Router: Selected "${result.workflow_execution.selected_agent}" (${result.workflow_execution.routing_method}, confidence: ${result.workflow_execution.routing_confidence?.toFixed(2) || 'N/A'})`
+              })
+            }
+          }
+          
           addLog({
             level: 'info',
             message: '✅ API execution completed successfully'
@@ -250,7 +266,8 @@ const TestPanel: React.FC = () => {
           // Add assistant response
           addMessage({
             type: 'assistant',
-            content: result.response || 'Agent executed successfully!'
+            content: result.response || 'Agent executed successfully!',
+            agentName: result.workflow_execution?.agent_name
           })
 
         } catch (apiError) {
@@ -394,8 +411,10 @@ const TestPanel: React.FC = () => {
       PaperProps={{
         sx: {
           width: { xs: '100vw', md: '500px' },
+          height: '100vh',
           display: 'flex',
-          flexDirection: 'column'
+          flexDirection: 'column',
+          overflow: 'hidden'
         }
       }}
     >
@@ -467,19 +486,57 @@ const TestPanel: React.FC = () => {
                 <Paper
                   sx={{
                     p: 2,
-                    maxWidth: '80%',
+                    maxWidth: '85%',
+                    minWidth: '200px',
                     backgroundColor: 
                       message.type === 'user' ? 'primary.main' : 
                       message.type === 'error' ? 'error.light' : 'grey.100',
                     color: 
                       message.type === 'user' ? 'white' :
-                      message.type === 'error' ? 'white' : 'text.primary'
+                      message.type === 'error' ? 'white' : 'text.primary',
+                    wordBreak: 'break-word',
+                    overflow: 'hidden'
                   }}
                 >
-                  <Typography variant="body2">
-                    {message.content}
-                  </Typography>
-                  <Typography variant="caption" sx={{ opacity: 0.7, display: 'block', mt: 0.5 }}>
+                  {/* Show agent name for assistant messages */}
+                  {message.type === 'assistant' && message.agentName && (
+                    <Chip 
+                      label={`Agent: ${message.agentName}`}
+                      size="small"
+                      sx={{ mb: 1, fontSize: '0.75rem' }}
+                      color="primary"
+                      variant="outlined"
+                    />
+                  )}
+                  
+                  {/* Enhanced message content with markdown support */}
+                  <Box sx={{ 
+                    '& a': { 
+                      color: message.type === 'user' ? 'white' : 'primary.main',
+                      textDecoration: 'underline',
+                      '&:hover': { 
+                        textDecoration: 'underline',
+                        opacity: 0.8 
+                      }
+                    },
+                    '& code': {
+                      backgroundColor: message.type === 'user' ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)',
+                      color: message.type === 'user' ? 'white' : 'text.primary'
+                    },
+                    '& pre': {
+                      backgroundColor: message.type === 'user' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+                      maxWidth: '100%',
+                      overflow: 'auto'
+                    }
+                  }}>
+                    <MessageRenderer 
+                      content={message.content}
+                      variant="body2"
+                      darkMode={message.type === 'user'}
+                    />
+                  </Box>
+                  
+                  <Typography variant="caption" sx={{ opacity: 0.7, display: 'block', mt: 1 }}>
                     {formatTime(message.timestamp)}
                   </Typography>
                 </Paper>

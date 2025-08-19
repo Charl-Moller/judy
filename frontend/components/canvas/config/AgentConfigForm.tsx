@@ -155,62 +155,13 @@ const AgentConfigForm: React.FC<AgentConfigFormProps> = ({ data, updateData }) =
         />
       </Box>
 
-      {/* Memory Settings */}
-      <Box>
-        <Typography variant="subtitle2" gutterBottom color="primary">
-          Memory & Context
+      {/* Memory Notice */}
+      <Alert severity="info">
+        <Typography variant="body2">
+          <strong>Memory & Knowledge:</strong> Add a Memory node to your workflow to enable 
+          conversation history, knowledge search (RAG), or smart memory combining both.
         </Typography>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={data.memory || false}
-                onChange={(e) => handleInputChange('memory', e.target.checked)}
-              />
-            }
-            label="Enable Memory"
-          />
-
-          {data.memory && (
-            <>
-              <Box sx={{ px: 2 }}>
-                <Typography gutterBottom>
-                  Context Window: {data.contextWindow || 4000} tokens
-                </Typography>
-                <Slider
-                  value={data.contextWindow || 4000}
-                  onChange={(_, value) => handleInputChange('contextWindow', value)}
-                  min={1000}
-                  max={32000}
-                  step={1000}
-                  marks={[
-                    { value: 1000, label: '1K' },
-                    { value: 8000, label: '8K' },
-                    { value: 16000, label: '16K' },
-                    { value: 32000, label: '32K' }
-                  ]}
-                />
-              </Box>
-
-              <FormControl fullWidth>
-                <InputLabel>RAG Index</InputLabel>
-                <Select
-                  value={data.ragIndex || ''}
-                  onChange={(e) => handleInputChange('ragIndex', e.target.value)}
-                  label="RAG Index"
-                >
-                  <MenuItem value="">None</MenuItem>
-                  {ragIndexes.map((index) => (
-                    <MenuItem key={index.id} value={index.id}>
-                      {index.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </>
-          )}
-        </Box>
-      </Box>
+      </Alert>
 
       {/* LLM Configuration */}
       <Box>

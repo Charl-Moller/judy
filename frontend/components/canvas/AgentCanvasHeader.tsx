@@ -12,6 +12,7 @@ import {
 import {
   Save as SaveIcon,
   PlayArrow as RunIcon,
+  ArrowBack as BackIcon,
   Fullscreen as FullscreenIcon,
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
@@ -24,12 +25,14 @@ interface AgentCanvasHeaderProps {
   agentName: string
   onSave?: () => void
   onExecute?: () => void
+  onBack?: () => void
 }
 
 const AgentCanvasHeader: React.FC<AgentCanvasHeaderProps> = ({ 
   agentName, 
   onSave, 
-  onExecute 
+  onExecute,
+  onBack 
 }) => {
   const { reactFlowInstance } = useFlow()
   const { openTestPanel, isExecuting } = useExecution()
@@ -135,6 +138,20 @@ const AgentCanvasHeader: React.FC<AgentCanvasHeaderProps> = ({
         </Typography>
         
         <Box sx={{ display: 'flex', gap: 1, flexGrow: 1, alignItems: 'center' }}>
+          {onBack && (
+            <Tooltip title="Back to Agent Builder">
+              <Button
+                startIcon={<BackIcon />}
+                onClick={onBack}
+                variant="outlined"
+                size="small"
+                sx={{ textTransform: 'none' }}
+              >
+                Back
+              </Button>
+            </Tooltip>
+          )}
+          
           <Tooltip title="Save Agent">
             <Button
               startIcon={<SaveIcon />}

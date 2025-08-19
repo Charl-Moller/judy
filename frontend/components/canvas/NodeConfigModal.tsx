@@ -200,8 +200,10 @@ const NodeConfigModal: React.FC = () => {
       PaperProps={{
         sx: {
           height: '80vh',
-          maxHeight: '800px'
-        }
+          maxHeight: '800px',
+          overflow: 'hidden'
+        },
+        onWheel: (e: React.WheelEvent) => e.stopPropagation()
       }}
     >
       <DialogTitle sx={{ 
@@ -249,7 +251,10 @@ const NodeConfigModal: React.FC = () => {
         </Tabs>
 
         {/* Tab Content */}
-        <Box sx={{ flex: 1, overflow: 'auto', p: 3 }}>
+        <Box 
+          sx={{ flex: 1, overflow: 'auto', p: 3 }}
+          onWheel={(e: React.WheelEvent) => e.stopPropagation()}
+        >
           {tabs.map((_, index) => (
             <TabPanel key={index} value={tabValue} index={index}>
               {index === 0 ? renderConfigForm() : (

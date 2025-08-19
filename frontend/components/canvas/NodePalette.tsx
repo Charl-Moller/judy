@@ -92,17 +92,26 @@ const NodePalette: React.FC = () => {
     event.dataTransfer.effectAllowed = 'move'
   }
 
+  const handleWheel = (e: React.WheelEvent) => {
+    // Prevent wheel events from bubbling to parent
+    e.stopPropagation()
+  }
+
   return (
     <Paper
       elevation={3}
+      onWheel={handleWheel}
       sx={{
         width: 280,
-        height: '100%',
-        overflow: 'auto',
-        borderRadius: 0
+        height: 'calc(100vh - 64px)', // Subtract header height
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        borderRadius: 0,
+        position: 'relative'
       }}
     >
-      <Box sx={{ p: 2 }}>
+      <Box sx={{ p: 2, flexShrink: 0 }}>
         <Typography variant="h6" gutterBottom>
           🎨 Node Palette
         </Typography>
@@ -111,7 +120,21 @@ const NodePalette: React.FC = () => {
         </Typography>
       </Box>
       <Divider />
-      <List>
+      <Box 
+        sx={{ 
+          flex: 1, 
+          overflow: 'auto',
+          '&::-webkit-scrollbar': {
+            width: '6px',
+          },
+          '&::-webkit-scrollbar-thumb': {
+            backgroundColor: 'rgba(0,0,0,0.2)',
+            borderRadius: '3px',
+          }
+        }}
+        onWheel={(e) => e.stopPropagation()}
+      >
+        <List>
         {nodeTypes.map((node) => {
           const Icon = node.icon
           return (
@@ -159,10 +182,11 @@ const NodePalette: React.FC = () => {
             </ListItem>
           )
         })}
-      </List>
+        </List>
+      </Box>
       
-      <Divider sx={{ mt: 2 }} />
-      <Box sx={{ p: 2 }}>
+      <Divider />
+      <Box sx={{ p: 2, flexShrink: 0 }}>
         <Typography variant="caption" color="text.secondary">
           💡 Tip: Connect nodes to create workflows. Right-click nodes to configure them.
         </Typography>

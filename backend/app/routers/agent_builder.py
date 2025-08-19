@@ -237,11 +237,17 @@ async def update_agent(
         update_data = agent_update.dict(exclude_unset=True)
         for field, value in update_data.items():
             if field == "nodes" and value:
-                # Convert nodes to dict format for storage
-                setattr(db_agent, field, [node.dict() for node in value])
+                # Convert nodes to dict format for storage - handle both dict and Pydantic objects
+                if isinstance(value[0], dict):
+                    setattr(db_agent, field, value)  # Already dicts
+                else:
+                    setattr(db_agent, field, [node.dict() for node in value])  # Pydantic objects
             elif field == "connections" and value:
-                # Convert connections to dict format for storage
-                setattr(db_agent, field, [conn.dict() for conn in value])
+                # Convert connections to dict format for storage - handle both dict and Pydantic objects
+                if isinstance(value[0], dict):
+                    setattr(db_agent, field, value)  # Already dicts
+                else:
+                    setattr(db_agent, field, [conn.dict() for conn in value])  # Pydantic objects
             else:
                 setattr(db_agent, field, value)
         

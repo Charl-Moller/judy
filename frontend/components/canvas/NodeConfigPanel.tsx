@@ -18,7 +18,8 @@ import {
   Storage as MemoryIcon,
   PlayArrow as TriggerIcon,
   Output as OutputIcon,
-  AccountTree as OrchestratorIcon
+  AccountTree as OrchestratorIcon,
+  Masks as PersonaIcon
 } from '@mui/icons-material'
 import { useNodeConfig } from '../../context/NodeConfigContext'
 import { useFlow } from '../../context/FlowContext'
@@ -29,6 +30,7 @@ import MemoryConfigForm from './config/MemoryConfigForm'
 import TriggerConfigForm from './config/TriggerConfigForm'
 import OutputConfigForm from './config/OutputConfigForm'
 import OrchestratorConfigForm from './config/OrchestratorConfigForm'
+import PersonaRouterConfigForm from './config/PersonaRouterConfigForm'
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -89,6 +91,8 @@ const NodeConfigPanel: React.FC = () => {
     switch (nodeType) {
       case 'agent':
         return <AgentIcon />
+      case 'persona_router':
+        return <PersonaIcon />
       case 'llm':
         return <LlmIcon />
       case 'tool':
@@ -110,6 +114,8 @@ const NodeConfigPanel: React.FC = () => {
     switch (nodeType) {
       case 'agent':
         return '#4caf50'
+      case 'persona_router':
+        return '#e91e63'
       case 'llm':
         return '#2196f3'
       case 'tool':
@@ -133,6 +139,8 @@ const NodeConfigPanel: React.FC = () => {
     switch (nodeType) {
       case 'agent':
         return <AgentConfigForm data={formData} updateData={updateFormData} />
+      case 'persona_router':
+        return <PersonaRouterConfigForm data={formData} updateData={updateFormData} />
       case 'llm':
         return <LLMConfigForm data={formData} updateData={updateFormData} />
       case 'tool':

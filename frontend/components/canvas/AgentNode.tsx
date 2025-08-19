@@ -21,7 +21,8 @@ import {
   Storage as MemoryIcon,
   PlayArrow as TriggerIcon,
   Output as OutputIcon,
-  AccountTree as OrchestratorIcon
+  AccountTree as OrchestratorIcon,
+  Masks as PersonaIcon
 } from '@mui/icons-material'
 import { useFlow } from '../../context/FlowContext'
 import { useNodeConfig } from '../../context/NodeConfigContext'
@@ -70,6 +71,8 @@ const AgentNode: React.FC<AgentNodeProps> = ({ data, selected, id }) => {
     switch (data.nodeType) {
       case 'agent':
         return <AgentIcon sx={{ fontSize: 20 }} />
+      case 'persona_router':
+        return <PersonaIcon sx={{ fontSize: 20 }} />
       case 'llm':
         return <LlmIcon sx={{ fontSize: 20 }} />
       case 'tool':
@@ -91,6 +94,8 @@ const AgentNode: React.FC<AgentNodeProps> = ({ data, selected, id }) => {
     switch (data.nodeType) {
       case 'agent':
         return '#4caf50'
+      case 'persona_router':
+        return '#e91e63'
       case 'llm':
         return '#2196f3'
       case 'tool':
@@ -121,10 +126,18 @@ const AgentNode: React.FC<AgentNodeProps> = ({ data, selected, id }) => {
     // For bottom handles, position nodes below
     let newPosition
     if (handleId.includes('output-llm') || handleId.includes('output-tool') || handleId.includes('output-memory')) {
-      const horizontalOffset = handleId.includes('llm') ? -150 : handleId.includes('tool') ? 0 : handleId.includes('memory') ? 150 : 0
+      const horizontalOffset = handleId.includes('llm') ? -150 : 
+                              handleId.includes('tool') ? 0 : 
+                              handleId.includes('memory') ? 150 : 0
       newPosition = {
         x: currentNode.position.x + horizontalOffset,
         y: currentNode.position.y + 200
+      }
+    } else if (handleId.includes('output-agent')) {
+      // Special case: agent connector on persona router is on right side
+      newPosition = {
+        x: currentNode.position.x + 300,
+        y: currentNode.position.y + 50
       }
     } else {
       // Standard left/right positioning
@@ -224,12 +237,14 @@ const AgentNode: React.FC<AgentNodeProps> = ({ data, selected, id }) => {
     reactFlowInstance.addNodes(newNode)
 
     // Create connection with proper handle mapping
-    const isBottomHandle = handleId.includes('output-llm') || handleId.includes('output-tool') || handleId.includes('output-memory')
+    const isBottomHandle = handleId.includes('output-llm') || handleId.includes('output-tool') || handleId.includes('output-memory') || handleId.includes('output-agent')
     
     // Determine correct target handle based on component type
     let targetHandle = 'input-main'
     if (targetType === 'llm' || targetType === 'tool' || targetType === 'memory') {
       targetHandle = 'connector-top'
+    } else if (targetType === 'agent') {
+      targetHandle = 'input-main'
     }
     
     const newEdge = {
@@ -242,7 +257,7 @@ const AgentNode: React.FC<AgentNodeProps> = ({ data, selected, id }) => {
       animated: true,
       style: {
         strokeWidth: 2,
-        stroke: handleId.includes('llm') ? '#2196f3' : handleId.includes('tool') ? '#ff9800' : handleId.includes('memory') ? '#9c27b0' : '#666'
+        stroke: handleId.includes('llm') ? '#2196f3' : handleId.includes('tool') ? '#ff9800' : handleId.includes('memory') ? '#9c27b0' : handleId.includes('agent') ? '#4caf50' : '#666'
       }
     }
 
@@ -641,6 +656,149 @@ const AgentNode: React.FC<AgentNodeProps> = ({ data, selected, id }) => {
       )
     }
 
+    // Persona Router special handles - LLM at bottom, Agent on right side
+    if (nodeType === 'persona_router') {
+      // LLM connection point (bottom center)
+      handles.push(
+        <div key="output-llm-persona-wrapper" style={{ position: 'absolute', bottom: -8, left: '50%', transform: 'translateX(-50%)' }}>
+          {/* Extended hover zone that covers dot, tooltip, and text label */}
+          <div
+            onMouseEnter={() => setHoveredHandle('output-llm-persona')}
+            onMouseLeave={() => setHoveredHandle(null)}
+            style={{ 
+              position: 'absolute',
+              // Extended zone that includes tooltip area above - made larger for easier clicking
+              width: '80px',
+              height: '60px', // Extended to cover tooltip area generously
+              left: '-40px', // Center over the dot
+              top: '-35px',  // Cover tooltip area above generously
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'center',
+              zIndex: 15
+            }}
+          >
+            <Handle
+              type="source"
+              position={Position.Bottom}
+              id="output-llm-persona"
+              style={{
+                background: hoveredHandle === 'output-llm-persona' ? '#64b5f6' : '#2196f3',
+                width: 12,
+                height: 12,
+                border: '2px solid white',
+                cursor: 'crosshair',
+                transition: 'all 0.2s',
+                position: 'absolute',
+                bottom: 0,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 10
+              }}
+              onConnect={() => {}} // Allow normal connections
+            />
+            {hoveredHandle === 'output-llm-persona' && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '18px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  fontSize: '10px',
+                  whiteSpace: 'nowrap',
+                  background: 'rgba(33, 150, 243, 0.9)',
+                  color: 'white',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  zIndex: 20,
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  handleCreateLinkedNode('output-llm-persona', 'llm')
+                  setHoveredHandle(null)
+                }}
+              >
+                + LLM
+              </div>
+            )}
+          </div>
+        </div>,
+
+        // Agent connection point (positioned below Out connector at edge)
+        <div key="output-agent-wrapper" style={{ position: 'absolute', right: -8, top: '75%', transform: 'translateY(-50%)' }}>
+          <div
+            onMouseEnter={() => setHoveredHandle('output-agent')}
+            onMouseLeave={() => setHoveredHandle(null)}
+            style={{ position: 'relative' }}
+          >
+            <Handle
+              type="source"
+              position={Position.Right}
+              id="output-agent"
+              style={{
+                background: hoveredHandle === 'output-agent' ? '#66bb6a' : '#4caf50',
+                width: 12,
+                height: 12,
+                border: '2px solid white',
+                cursor: 'crosshair',
+                transition: 'all 0.2s'
+              }}
+              onConnect={() => {}} // Allow normal connections
+            />
+            {/* Invisible click area for creating nodes */}
+            <div
+              style={{
+                position: 'absolute',
+                width: 20,
+                height: 20,
+                left: -4,
+                top: -4,
+                cursor: 'pointer',
+                zIndex: 10
+              }}
+              onClick={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                handleCreateLinkedNode('output-agent', 'agent')
+              }}
+            />
+            {hoveredHandle === 'output-agent' && (
+              <div
+                style={{
+                  position: 'absolute',
+                  left: -45,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: '10px',
+                  whiteSpace: 'nowrap',
+                  background: 'rgba(76, 175, 80, 0.9)',
+                  color: 'white',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  zIndex: 20,
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  handleCreateLinkedNode('output-agent', 'agent')
+                  setHoveredHandle(null)
+                }}
+              >
+                + Agent
+              </div>
+            )}
+          </div>
+        </div>
+      )
+    }
+
     // Memory component now uses single top connector like LLM and Tool (handled above)
 
     return handles
@@ -656,6 +814,21 @@ const AgentNode: React.FC<AgentNodeProps> = ({ data, selected, id }) => {
         }
         if (data.capabilities?.length > 0) {
           details.push(`${data.capabilities.length} capabilities`)
+        }
+        break
+      case 'persona_router':
+        if (data.intents?.method) {
+          details.push(`${data.intents.method} detection`)
+        }
+        // Count actual connections dynamically
+        if (reactFlowInstance) {
+          const edges = reactFlowInstance.getEdges()
+          const nodes = reactFlowInstance.getNodes()
+          const connectedAgentCount = edges.filter(edge => 
+            edge.source === id && 
+            nodes.some(n => n.id === edge.target && n.type === 'agent')
+          ).length
+          details.push(`${connectedAgentCount} connected agents`)
         }
         break
       case 'llm':
@@ -885,6 +1058,85 @@ const AgentNode: React.FC<AgentNodeProps> = ({ data, selected, id }) => {
         >
           Out
         </Typography>
+      )}
+      
+      {/* Special labels for persona_router */}
+      {data.nodeType === 'persona_router' && (
+        <>
+          {/* In label */}
+          <Typography
+            sx={{
+              position: 'absolute',
+              left: -25,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              fontSize: '8px',
+              color: '#666',
+              fontWeight: 'bold',
+              background: 'white',
+              padding: '0 2px',
+              borderRadius: '2px'
+            }}
+          >
+            In
+          </Typography>
+          
+          {/* Out label */}
+          <Typography
+            sx={{
+              position: 'absolute',
+              right: -25,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              fontSize: '8px',
+              color: '#666',
+              fontWeight: 'bold',
+              background: 'white',
+              padding: '0 2px',
+              borderRadius: '2px'
+            }}
+          >
+            Out
+          </Typography>
+          
+          {/* Agent label */}
+          <Typography
+            sx={{
+              position: 'absolute',
+              right: -40,
+              top: '75%',
+              transform: 'translateY(-50%)',
+              fontSize: '8px',
+              color: '#4caf50',
+              fontWeight: 'bold',
+              background: 'white',
+              padding: '0 3px',
+              borderRadius: '2px',
+              border: '1px solid #4caf5020'
+            }}
+          >
+            Agent
+          </Typography>
+          
+          {/* LLM label */}
+          <Typography
+            sx={{
+              position: 'absolute',
+              bottom: -15,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              fontSize: '8px',
+              color: '#2196f3',
+              fontWeight: 'bold',
+              background: 'white',
+              padding: '0 3px',
+              borderRadius: '2px',
+              border: '1px solid #2196f320'
+            }}
+          >
+            LLM
+          </Typography>
+        </>
       )}
       
       {/* Header with icon and node type */}

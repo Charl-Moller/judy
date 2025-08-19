@@ -7,6 +7,7 @@ interface ExecutionMessage {
   content: string
   nodeId?: string
   nodeName?: string
+  agentName?: string
 }
 
 interface ExecutionLog {

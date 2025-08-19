@@ -351,3 +351,106 @@ class AgentTemplate(Base):
 
 # Add back-reference relationships for agent builder
 AgentBuilder.executions = relationship("AgentExecution", back_populates="agent")
+
+
+# ============================================================================
+# TOOL MANAGEMENT MODELS
+# ============================================================================
+
+class ToolCategory(Base):
+    __tablename__ = "tool_categories"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False, unique=True)
+    description = Column(Text)
+    icon = Column(String)  # Icon name or emoji for UI
+    color = Column(String)  # Hex color code for UI theming
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Tool(Base):
+    __tablename__ = "tools"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False, unique=True)  # Function name
+    display_name = Column(String, nullable=False)  # Human-readable name
+    description = Column(Text, nullable=False)
+    category_id = Column(UUID(as_uuid=True), ForeignKey("tool_categories.id"), nullable=False)
+    
+    # Tool configuration
+    parameters = Column(JSON, nullable=False)  # Parameter definitions
+    parameter_schema = Column(JSON)  # JSON schema for validation
+    examples = Column(JSON, default=list)  # Usage examples
+    
+    # Tool metadata
+    is_active = Column(Boolean, default=True)
+    is_builtin = Column(Boolean, default=True)  # Built-in vs custom tools
+    version = Column(String, default="1.0.0")
+    
+    # Usage statistics
+    usage_count = Column(Integer, default=0)
+    success_count = Column(Integer, default=0)
+    failure_count = Column(Integer, default=0)
+    avg_execution_time_ms = Column(Integer, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    category = relationship("ToolCategory", backref="tools")
+
+
+class CustomTool(Base):
+    __tablename__ = "custom_tools"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    display_name = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    category_id = Column(UUID(as_uuid=True), ForeignKey("tool_categories.id"), nullable=False)
+    
+    # Custom tool code
+    source_code = Column(Text, nullable=False)  # Python function source code
+    requirements = Column(JSON, default=list)  # Python dependencies
+    
+    # Configuration
+    parameters = Column(JSON, nullable=False)  # Parameter definitions
+    parameter_schema = Column(JSON)  # JSON schema for validation
+    examples = Column(JSON, default=list)  # Usage examples
+    
+    # Tool metadata
+    is_active = Column(Boolean, default=True)
+    version = Column(String, default="1.0.0")
+    created_by = Column(String, nullable=True)  # Creator's user ID
+    
+    # Usage statistics
+    usage_count = Column(Integer, default=0)
+    success_count = Column(Integer, default=0)
+    failure_count = Column(Integer, default=0)
+    avg_execution_time_ms = Column(Integer, nullable=True)
+    
+    # Security and validation
+    is_validated = Column(Boolean, default=False)
+    validation_errors = Column(JSON, default=list)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    category = relationship("ToolCategory")
+
+
+# Association table for capability-tools relationship
+capability_tools_map = Table(
+    "capability_tools_map", Base.metadata,
+    Column("capability_id", UUID(as_uuid=True), ForeignKey("capabilities.id")),
+    Column("tool_id", UUID(as_uuid=True), ForeignKey("tools.id"))
+)
+
+# Update Capability model to include tools relationship
+Capability.tools = relationship("Tool", secondary=capability_tools_map, backref="capabilities")

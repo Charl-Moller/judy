@@ -17,7 +17,8 @@ import {
   Storage as MemoryIcon,
   PlayArrow as TriggerIcon,
   Output as OutputIcon,
-  AccountTree as OrchestratorIcon
+  AccountTree as OrchestratorIcon,
+  Masks as PersonaIcon
 } from '@mui/icons-material'
 
 interface NodeType {
@@ -33,11 +34,19 @@ const nodeTypes: NodeType[] = [
   // Core AI Components
   { 
     type: 'agent', 
-    label: 'AI Agent', 
+    label: 'Agent', 
     icon: AgentIcon, 
     color: '#4caf50',
-    description: 'Core AI agent with customizable behavior',
-    category: 'AI Components'
+    description: 'Single-purpose AI agent with basic behavior',
+    category: 'Core Components'
+  },
+  { 
+    type: 'persona_router', 
+    label: 'Persona Router', 
+    icon: PersonaIcon, 
+    color: '#e91e63',
+    description: 'Multi-persona agent with intent-based routing',
+    category: 'Core Components'
   },
   { 
     type: 'llm', 
@@ -45,51 +54,51 @@ const nodeTypes: NodeType[] = [
     icon: LlmIcon, 
     color: '#2196f3',
     description: 'Language model for text generation',
-    category: 'AI Components'
+    category: 'Core Components'
   },
+
+  // Memory & Tools
+  { 
+    type: 'memory', 
+    label: 'Memory', 
+    icon: MemoryIcon, 
+    color: '#9c27b0',
+    description: 'Conversation, knowledge, or smart memory',
+    category: 'Memory & Tools'
+  },
+  { 
+    type: 'tool', 
+    label: 'Tool', 
+    icon: ToolIcon, 
+    color: '#ff9800',
+    description: 'External tool or function integration',
+    category: 'Memory & Tools'
+  },
+
+  // Advanced Components
   { 
     type: 'orchestrator', 
     label: 'Orchestrator', 
     icon: OrchestratorIcon, 
     color: '#673ab7',
     description: 'Coordinates multiple agents and workflows',
-    category: 'AI Components'
+    category: 'Advanced'
   },
-
-  // Tools & Capabilities  
-  { 
-    type: 'tool', 
-    label: 'Tool/Capability', 
-    icon: ToolIcon, 
-    color: '#ff9800',
-    description: 'External tool or function integration',
-    category: 'Tools & Data'
-  },
-  { 
-    type: 'memory', 
-    label: 'Memory Store', 
-    icon: MemoryIcon, 
-    color: '#9c27b0',
-    description: 'Vector or traditional memory storage',
-    category: 'Tools & Data'
-  },
-
-  // I/O Components
   { 
     type: 'trigger', 
-    label: 'Input Trigger', 
+    label: 'Trigger', 
     icon: TriggerIcon, 
     color: '#00bcd4',
     description: 'Webhook, API, or event trigger',
-    category: 'Input/Output'
+    category: 'Advanced'
   },
   { 
     type: 'output', 
-    label: 'Output Handler', 
+    label: 'Output', 
     icon: OutputIcon, 
     color: '#f44336',
     description: 'Format and deliver results',
-    category: 'Input/Output'
+    category: 'Advanced'
   }
 ]
 
@@ -111,15 +120,18 @@ const AgentPalette: React.FC = () => {
   return (
     <Paper
       elevation={3}
+      onWheel={(e) => e.stopPropagation()}
       sx={{
         width: 300,
         height: '100%',
-        overflow: 'auto',
+        overflow: 'hidden',
         borderRadius: 0,
-        borderRight: '1px solid #e0e0e0'
+        borderRight: '1px solid #e0e0e0',
+        display: 'flex',
+        flexDirection: 'column'
       }}
     >
-      <Box sx={{ p: 2 }}>
+      <Box sx={{ p: 2, flexShrink: 0 }}>
         <Typography variant="h6" gutterBottom>
           🤖 Agent Components
         </Typography>
@@ -128,6 +140,7 @@ const AgentPalette: React.FC = () => {
         </Typography>
       </Box>
       
+      <Box sx={{ flex: 1, overflow: 'auto' }} onWheel={(e) => e.stopPropagation()}>
       {Object.entries(nodeCategories).map(([category, nodes]) => (
         <Box key={category}>
           <Divider />
@@ -200,11 +213,12 @@ const AgentPalette: React.FC = () => {
           </List>
         </Box>
       ))}
+      </Box>
       
-      <Divider sx={{ mt: 2 }} />
+      <Divider />
       
       {/* Enhanced Quick Start Guide */}
-      <Box sx={{ p: 2 }}>
+      <Box sx={{ p: 2, flexShrink: 0 }}>
         <Alert severity="info" sx={{ mb: 2, '& .MuiAlert-message': { width: '100%' } }}>
           <AlertTitle sx={{ fontSize: '0.8rem', fontWeight: 'bold' }}>🚀 Quick Start</AlertTitle>
           <Typography variant="caption" sx={{ fontSize: '0.7rem', display: 'block', mt: 0.5 }}>

@@ -407,16 +407,6 @@ export default function AgentBuilderPage() {
   if (showEditor) {
     return (
       <div className="h-screen flex flex-col">
-        {/* Back Navigation */}
-        <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-          <button
-            onClick={() => setShowEditor(false)}
-            className="btn btn-secondary"
-          >
-            ← Back to Agent Builder
-          </button>
-        </div>
-        
         {/* Visual Canvas Editor */}
         <div className="flex-1">
           <FlowProvider>
@@ -424,6 +414,7 @@ export default function AgentBuilderPage() {
               initialAgent={currentAgent}
               onSave={handleSaveAgent}
               onExecute={handleExecuteAgent}
+              onBack={() => setShowEditor(false)}
               height="100%"
             />
           </FlowProvider>

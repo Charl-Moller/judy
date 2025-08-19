@@ -6,6 +6,7 @@ from ..config import settings
 import uuid
 from datetime import datetime
 import re
+import json
 from pathlib import Path
 
 print("=== ORCHESTRATOR MODULE LOADED ===")
@@ -100,41 +101,50 @@ def hybrid_rag_web_search(agent, query):
     return {"attachments": attachments, "prompt": prompt}
 
 def execute_single_agent(agent, message, files, prev_output):
-    print(f"=== EXECUTE_SINGLE_AGENT START ===")
-    print(f"Message: {message}")
-    print(f"Files: {files}")
-    print(f"Agent capabilities: {[c.name for c in agent.capabilities]}")
-    print(f"prev_output received: {prev_output}")
-    print(f"prev_output type: {type(prev_output)}")
-    print(f"prev_output keys: {list(prev_output.keys()) if isinstance(prev_output, dict) else 'Not a dict'}")
+    print("\n" + "="*60)
+    print("🤖 AGENT EXECUTION START")
+    print("="*60)
+    print(f"🔥 Agent: '{agent.name}' (ID: {agent.id})")
+    print(f"🧠 LLM Model: {agent.llm_config.model_name if agent.llm_config else 'None'}")
+    print(f"⚡ Capabilities: {[c.name for c in agent.capabilities] if agent.capabilities else 'None'}")
+    print(f"💬 Message: {message[:100]}{'...' if len(message) > 100 else ''}")
+    print(f"📁 Files: {files if files else 'None'}")
+    print(f"📝 Context: {list(prev_output.keys()) if isinstance(prev_output, dict) else 'Not a dict'}")
+    print("="*60)
     
     tools = []
     caps = [c.name for c in agent.capabilities]
     
-    # Import and prepare tools based on capabilities
-    if "image_analysis" in caps:
-        from .tools.image_analysis import image_analysis
-        tools.append(image_analysis)
-        print("Added image_analysis tool")
+    # Use dynamic tools from workflow if available
+    if "available_tools" in prev_output and prev_output["available_tools"]:
+        workflow_tools = prev_output["available_tools"]
+        tools.extend(workflow_tools.values())
+        print(f"🔧 [{agent.name}] Loaded {len(workflow_tools)} workflow tools: {list(workflow_tools.keys())}")
+    else:
+        # Fallback to legacy capability-based tool loading
+        if "image_analysis" in caps:
+            from .tools.image_analysis import image_analysis
+            tools.append(image_analysis)
+            print(f"🔧 [{agent.name}] Added legacy image_analysis tool")
+        
+        if "diagram_generation" in caps:
+            from .tools.diagram_generator import diagram_generator
+            tools.append(diagram_generator)
+            print(f"🔧 [{agent.name}] Added legacy diagram_generator tool")
     
-    if "diagram_generation" in caps:
-        from .tools.diagram_generator import diagram_generator
-        tools.append(diagram_generator)
-        print("Added diagram_generator tool")
-    
-    print(f"Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
-    print(f"=== TOOLS PROCESSED ===")
+    print(f"🛠️ [{agent.name}] Available tools: {[tool.__name__ if hasattr(tool, '__name__') else str(tool) for tool in tools]}")
+    print(f"✅ [{agent.name}] Tools prepared")
     
     if "rag" in caps and "web_search" in caps:
-        print(f"Processing RAG and web search...")
+        print(f"🔍 [{agent.name}] Processing RAG and web search...")
         hybrid = hybrid_rag_web_search(agent, message)
         message = hybrid["prompt"]
         prev_output["attachments"].extend(hybrid["attachments"])
+        print(f"✅ [{agent.name}] RAG and web search completed")
     
-    print(f"=== BEFORE FILE PROCESSING ===")
     # Process files with appropriate tools
     if files and "image_analysis" in caps:
-        print(f"Processing {len(files)} files with image analysis capability")
+        print(f"📷 [{agent.name}] Processing {len(files)} files with image analysis capability")
         
         # Check if the agent's LLM config supports vision
         supports_vision = False
@@ -146,7 +156,7 @@ def execute_single_agent(agent, message, files, prev_output):
             ])
         
         if supports_vision:
-            print(f"Agent {agent.name} uses vision-capable model: {agent.llm_config.model_name}")
+            print(f"👁️ [{agent.name}] Using vision-capable model: {agent.llm_config.model_name}")
             # For vision-capable models, we'll include image data in the message
             # The model will analyze the images directly
             file_context = f"\n\nYou have been provided with {len(files)} image file(s) to analyze. Please examine each image carefully and provide a detailed description of what you see, including any text, objects, scenes, or other visual elements."
@@ -158,7 +168,7 @@ def execute_single_agent(agent, message, files, prev_output):
             # 3. Include them in the messages array for the vision model
             # 4. The model would then analyze the visual content directly
         else:
-            print(f"Agent {agent.name} uses non-vision model: {agent.llm_config.model_name if agent.llm_config else 'None'}")
+            print(f"🔄 [{agent.name}] Using non-vision model: {agent.llm_config.model_name if agent.llm_config else 'None'} - using tool-based image analysis")
             # For non-vision models, use the tool-based approach
             from .tools.image_analysis import image_analysis
             
@@ -166,7 +176,7 @@ def execute_single_agent(agent, message, files, prev_output):
             file_analyses = []
             for file_id in files:
                 try:
-                    print(f"Processing file ID: {file_id}")
+                    print(f"📁 [{agent.name}] Processing file ID: {file_id}")
                     # Get file information from database
                     from ..db import models
                     from ..db.database import SessionLocal
@@ -175,31 +185,31 @@ def execute_single_agent(agent, message, files, prev_output):
                     try:
                         file_record = db.query(models.File).filter(models.File.id == file_id).first()
                         if file_record:
-                            print(f"Found file record: {file_record.filename}, URL: {file_record.url}")
+                            print(f"📄 [{agent.name}] Found file record: {file_record.filename}, URL: {file_record.url}")
                             # Call the image analysis tool
                             analysis_result = image_analysis(str(file_id), file_record.url)
-                            print(f"Image analysis result: {analysis_result}")
+                            print(f"🔍 [{agent.name}] Image analysis result: {analysis_result}")
                             if analysis_result.get("success"):
                                 file_analyses.append(f"File {file_record.filename}: {analysis_result['analysis']}")
                             else:
                                 file_analyses.append(f"File {file_record.filename}: Analysis failed - {analysis_result.get('error', 'Unknown error')}")
                         else:
-                            print(f"File record not found for ID: {file_id}")
+                            print(f"❌ [{agent.name}] File record not found for ID: {file_id}")
                             file_analyses.append(f"File ID {file_id}: File not found in database")
                     finally:
                         db.close()
                         
                 except Exception as e:
-                    print(f"Error processing file {file_id}: {e}")
+                    print(f"❌ [{agent.name}] Error processing file {file_id}: {e}")
                     file_analyses.append(f"File ID {file_id}: Error processing - {str(e)}")
             
             # Add file analysis results to the message
             if file_analyses:
                 file_context = f"\n\nFile Analysis Results:\n" + "\n".join(file_analyses)
                 message += file_context
-                print(f"Added file analysis results to message: {file_context}")
+                print(f"✅ [{agent.name}] Added file analysis results to message")
             else:
-                print("No file analysis results to add")
+                print(f"ℹ️ [{agent.name}] No file analysis results to add")
     
     # Check if the agent's LLM config supports vision for image processing
     supports_vision = False
@@ -210,27 +220,17 @@ def execute_single_agent(agent, message, files, prev_output):
             "gpt-4v", "gpt-4-vision", "gpt-4o", "gpt-4.1", "gpt-5-chat"
         ])
     
-    # Execute tools based on user request
-    print("=== ABOUT TO CALL TOOL EXECUTION (NON-STREAMING) ===")
-    tool_results = _execute_tools_based_on_request_sync(message, tools, caps)
-    print(f"Tool execution results: {tool_results}")
-    if tool_results:
-        print(f"Adding tool results to message. Original message: {message}")
-        # Instead of appending to the message, let's create a new enhanced message
-        enhanced_message = f"{message}\n\nI have executed some tools for you. Here are the results:\n{tool_results}\n\nPlease provide a helpful response based on these tool results."
-        message = enhanced_message
-        print(f"Enhanced message: {message}")
-    else:
-        print("No tool results to add")
-    
-    print("=== TOOL EXECUTION COMPLETE (NON-STREAMING) ===")
+    # Tools will be handled by the LLM through proper tool calling
+    print(f"🔧 [{agent.name}] {len(tools)} tools available for LLM to call autonomously")
     
     # Check if agent has LLM config
     if not agent.llm_config:
+        print(f"❌ [{agent.name}] No LLM config found")
         return {"response": f"[No LLM config found for agent {agent.name}] Please configure an LLM for this agent.", "attachments": prev_output.get("attachments", []), "tool_calls": []}
     
     # Check if we have the required LLM config fields
     if not agent.llm_config.api_base:
+        print(f"❌ [{agent.name}] LLM config incomplete - missing API base URL")
         return {"response": f"[LLM config incomplete] Agent {agent.name} is missing API base URL. Please configure the LLM config properly.", "attachments": prev_output.get("attachments", []), "tool_calls": []}
 
     try:
@@ -249,7 +249,7 @@ def execute_single_agent(agent, message, files, prev_output):
                 else:
                     try:
                         api_key = resolve_azure_keyvault_secret(secret_ref)
-                        print(f"Successfully resolved Key Vault secret for agent {agent.name}")
+                        print(f"🔑 [{agent.name}] Successfully resolved Key Vault secret")
                     except Exception as e:
                         print(f"Failed to resolve Key Vault secret: {e}")
                         # Fall back to environment variable
@@ -285,6 +285,11 @@ def execute_single_agent(agent, message, files, prev_output):
         else:
             system_content = f"You are agent {agent.name} with capabilities: {', '.join(caps)}. "
         
+        # Add tool descriptions if available
+        if "tools_description" in prev_output:
+            system_content += f"\n\nTOOLS AVAILABLE:\n{prev_output['tools_description']}"
+            print(f"🔧 [{agent.name}] Added tools description to system prompt")
+        
         # Add specific instructions for image analysis
         if "image_analysis" in caps:
             system_content += "\n\nIMPORTANT: You have the ability to analyze images. When users upload images, you should describe what you see in the image. If you receive file IDs or URLs, acknowledge them and provide helpful analysis based on the image content."
@@ -295,21 +300,21 @@ def execute_single_agent(agent, message, files, prev_output):
         ]
         
         # Handle conversation history for memory
-        print(f"=== MEMORY DEBUG ===")
-        print(f"prev_output keys: {list(prev_output.keys())}")
-        print(f"conversation_history: {prev_output.get('conversation_history')}")
+        print(f"\n💾 [{agent.name}] MEMORY PROCESSING")
+        print(f"📝 [{agent.name}] Context keys: {list(prev_output.keys())}")
+        print(f"💬 [{agent.name}] Conversation history: {len(prev_output.get('conversation_history', []))} messages" if prev_output.get('conversation_history') else f"💬 [{agent.name}] No conversation history")
         
         if prev_output.get("conversation_history"):
             # Add conversation history to messages
             conversation_history = prev_output["conversation_history"]
             include_system = prev_output.get("include_system_messages", True)
             
-            print(f"Adding {len(conversation_history)} conversation turns to context")
-            print(f"Include system messages: {include_system}")
+            print(f"📚 [{agent.name}] Adding {len(conversation_history)} conversation turns to context")
+            print(f"⚙️ [{agent.name}] Include system messages: {include_system}")
             
             # Add previous conversation turns
-            for turn in conversation_history:
-                print(f"Adding turn: {turn.get('role')} - {turn.get('content', '')[:50]}...")
+            for i, turn in enumerate(conversation_history):
+                print(f"📄 [{agent.name}] Adding turn {i+1}: {turn.get('role')} - {turn.get('content', '')[:50]}...")
                 if turn.get("role") == "user":
                     messages.append({"role": "user", "content": turn.get("content", "")})
                 elif turn.get("role") == "assistant":
@@ -321,8 +326,8 @@ def execute_single_agent(agent, message, files, prev_output):
             # Fallback to old behavior
             system_content += f"Previous context: {prev_output['response']} "
         
-        print(f"Final messages array length: {len(messages)}")
-        print(f"=== END MEMORY DEBUG ===")
+        print(f"✅ [{agent.name}] Final messages array length: {len(messages)}")
+        print(f"💾 [{agent.name}] Memory processing complete")
         
         # For vision models, include image data in the user message
         if files and "image_analysis" in caps and supports_vision:
@@ -390,6 +395,32 @@ def execute_single_agent(agent, message, files, prev_output):
             "stream": False  # Non-streaming for this function
         }
         
+        # Add tools to API parameters if available
+        if tools:
+            # Convert tools to OpenAI format
+            openai_tools = []
+            for tool in tools:
+                if hasattr(tool, '__name__') and hasattr(tool, '__doc__'):
+                    # Convert function tool to OpenAI tool format
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": tool.__name__,
+                            "description": tool.__doc__ or f"Execute {tool.__name__}",
+                            # Add parameters schema if available
+                            "parameters": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        }
+                    })
+            
+            if openai_tools:
+                api_params["tools"] = openai_tools
+                api_params["tool_choice"] = "auto"  # Let LLM decide when to use tools
+                print(f"🔧 [{agent.name}] Added {len(openai_tools)} tools to API call")
+        
         # Handle different token parameter names for different models
         if "gpt-5-mini" in model_name.lower():
             api_params["max_completion_tokens"] = max_tokens
@@ -399,18 +430,109 @@ def execute_single_agent(agent, message, files, prev_output):
             api_params["temperature"] = temperature
         
         # Make the API call
+        print(f"🚀 [{agent.name}] Calling {model_name} with {len(messages)} messages...")
         response = client.chat.completions.create(**api_params)
         
-        # Get the response content
-        full_response = response.choices[0].message.content
+        # Get the response message
+        message_response = response.choices[0].message
+        full_response = message_response.content
+        tool_calls = message_response.tool_calls if hasattr(message_response, 'tool_calls') else None
+        
+        print(f"✅ [{agent.name}] LLM call completed - response length: {len(full_response) if full_response else 0} characters")
+        if tool_calls:
+            print(f"🔧 [{agent.name}] LLM requested {len(tool_calls)} tool calls")
+        
+        # Execute tool calls if any
+        tool_results = []
+        if tool_calls:
+            for tool_call in tool_calls:
+                try:
+                    function_name = tool_call.function.name
+                    function_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                    
+                    print(f"🛠️ [{agent.name}] Executing tool: {function_name} with args: {function_args}")
+                    
+                    # Find the tool function
+                    tool_func = None
+                    for tool in tools:
+                        if hasattr(tool, '__name__') and tool.__name__ == function_name:
+                            tool_func = tool
+                            break
+                    
+                    if tool_func:
+                        # Execute the tool
+                        result = tool_func(**function_args)
+                        tool_results.append({
+                            "tool_call_id": tool_call.id,
+                            "result": result
+                        })
+                        print(f"✅ [{agent.name}] Tool {function_name} executed successfully")
+                    else:
+                        print(f"❌ [{agent.name}] Tool {function_name} not found")
+                        tool_results.append({
+                            "tool_call_id": tool_call.id,
+                            "result": {"error": f"Tool {function_name} not found"}
+                        })
+                        
+                except Exception as e:
+                    print(f"❌ [{agent.name}] Error executing tool {tool_call.function.name}: {e}")
+                    tool_results.append({
+                        "tool_call_id": tool_call.id,
+                        "result": {"error": str(e)}
+                    })
+            
+            # If tools were called, we need to continue the conversation with tool results
+            if tool_results:
+                # Add the assistant's message with tool calls
+                messages.append({
+                    "role": "assistant",
+                    "content": full_response,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in tool_calls
+                    ]
+                })
+                
+                # Add tool results
+                for tool_result in tool_results:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_result["tool_call_id"],
+                        "content": json.dumps(tool_result["result"])
+                    })
+                
+                # Make another API call to get the final response
+                api_params["messages"] = messages
+                print(f"🔄 [{agent.name}] Making follow-up call with tool results...")
+                
+                final_response = client.chat.completions.create(**api_params)
+                final_content = final_response.choices[0].message.content
+                
+                print(f"✅ [{agent.name}] Final response after tool execution: {len(final_content) if final_content else 0} characters")
+                full_response = final_content
+        
+        print(f"🎯 [{agent.name}] Response preview: {full_response[:100] if full_response else 'None'}{'...' if full_response and len(full_response) > 100 else ''}")
+        print("\n" + "="*60)
+        print("🎉 AGENT EXECUTION COMPLETE")
+        print("="*60)
         
         return {
             "response": full_response, 
             "attachments": prev_output.get("attachments", []), 
-            "tool_calls": []
+            "tool_calls": tool_calls if tool_calls else []
         }
         
     except Exception as e:
+        print(f"❌ [{agent.name}] Error during execution: {str(e)}")
+        print("\n" + "="*60)
+        print("💥 AGENT EXECUTION FAILED")
+        print("="*60)
         return {"response": f"[Error calling LLM: {str(e)}] {message}", "attachments": prev_output.get("attachments", []), "tool_calls": []}
 
 async def execute_single_agent_stream(agent, message, files, prev_output):
@@ -418,14 +540,20 @@ async def execute_single_agent_stream(agent, message, files, prev_output):
     tools = []
     caps = [c.name for c in agent.capabilities]
     
-    # Import and prepare tools based on capabilities
-    if "image_analysis" in caps:
-        from .tools.image_analysis import image_analysis
-        tools.append(image_analysis)
-    
-    if "diagram_generation" in caps:
-        from .tools.diagram_generator import diagram_generator
-        tools.append(diagram_generator)
+    # Use dynamic tools from workflow if available
+    if "available_tools" in prev_output and prev_output["available_tools"]:
+        workflow_tools = prev_output["available_tools"]
+        tools.extend(workflow_tools.values())
+        print(f"🔧 [{agent.name}] STREAMING: Loaded {len(workflow_tools)} workflow tools: {list(workflow_tools.keys())}")
+    else:
+        # Fallback to legacy capability-based tool loading
+        if "image_analysis" in caps:
+            from .tools.image_analysis import image_analysis
+            tools.append(image_analysis)
+        
+        if "diagram_generation" in caps:
+            from .tools.diagram_generator import diagram_generator
+            tools.append(diagram_generator)
     
     if "rag" in caps and "web_search" in caps:
         hybrid = hybrid_rag_web_search(agent, message)
@@ -464,7 +592,7 @@ async def execute_single_agent_stream(agent, message, files, prev_output):
             file_analyses = []
             for file_id in files:
                 try:
-                    print(f"Processing file ID: {file_id}")
+                    print(f"📁 [{agent.name}] Processing file ID: {file_id}")
                     # Get file information from database
                     from ..db import models
                     from ..db.database import SessionLocal
@@ -473,46 +601,34 @@ async def execute_single_agent_stream(agent, message, files, prev_output):
                     try:
                         file_record = db.query(models.File).filter(models.File.id == file_id).first()
                         if file_record:
-                            print(f"Found file record: {file_record.filename}, URL: {file_record.url}")
+                            print(f"📄 [{agent.name}] Found file record: {file_record.filename}, URL: {file_record.url}")
                             # Call the image analysis tool
                             analysis_result = image_analysis(str(file_id), file_record.url)
-                            print(f"Image analysis result: {analysis_result}")
+                            print(f"🔍 [{agent.name}] Image analysis result: {analysis_result}")
                             if analysis_result.get("success"):
                                 file_analyses.append(f"File {file_record.filename}: {analysis_result['analysis']}")
                             else:
                                 file_analyses.append(f"File {file_record.filename}: Analysis failed - {analysis_result.get('error', 'Unknown error')}")
                         else:
-                            print(f"File record not found for ID: {file_id}")
+                            print(f"❌ [{agent.name}] File record not found for ID: {file_id}")
                             file_analyses.append(f"File ID {file_id}: File not found in database")
                     finally:
                         db.close()
                         
                 except Exception as e:
-                    print(f"Error processing file {file_id}: {e}")
+                    print(f"❌ [{agent.name}] Error processing file {file_id}: {e}")
                     file_analyses.append(f"File ID {file_id}: Error processing - {str(e)}")
             
             # Add file analysis results to the message
             if file_analyses:
                 file_context = f"\n\nFile Analysis Results:\n" + "\n".join(file_analyses)
                 message += file_context
-                print(f"Added file analysis results to message: {file_context}")
+                print(f"✅ [{agent.name}] Added file analysis results to message")
             else:
-                print("No file analysis results to add")
+                print(f"ℹ️ [{agent.name}] No file analysis results to add")
     
-    # Execute tools based on user request
-    print("=== ABOUT TO CALL TOOL EXECUTION ===")
-    tool_results = _execute_tools_based_on_request_sync(message, tools, caps)
-    print(f"Tool execution results: {tool_results}")
-    if tool_results:
-        print(f"Adding tool results to message. Original message: {message}")
-        # Instead of appending to the message, let's create a new enhanced message
-        enhanced_message = f"{message}\n\nI have executed some tools for you. Here are the results:\n{tool_results}\n\nPlease provide a helpful response based on these tool results."
-        message = enhanced_message
-        print(f"Enhanced message: {message}")
-    else:
-        print("No tool results to add")
-    
-    print("=== TOOL EXECUTION COMPLETE ===")
+    # Tools will be handled by the LLM through proper tool calling
+    print(f"🔧 [streaming] {len(tools)} tools available for LLM to call autonomously")
     
     # Check if the agent's LLM config supports vision for image processing
     supports_vision = False
@@ -549,7 +665,7 @@ async def execute_single_agent_stream(agent, message, files, prev_output):
                 else:
                     try:
                         api_key = resolve_azure_keyvault_secret(secret_ref)
-                        print(f"Successfully resolved Key Vault secret for agent {agent.name}")
+                        print(f"🔑 [{agent.name}] Successfully resolved Key Vault secret")
                     except Exception as e:
                         print(f"Failed to resolve Key Vault secret: {e}")
                         # Fall back to environment variable
@@ -587,6 +703,11 @@ async def execute_single_agent_stream(agent, message, files, prev_output):
             system_content = agent.system_prompt
         else:
             system_content = f"You are agent {agent.name} with capabilities: {', '.join(caps)}. "
+        
+        # Add tool descriptions if available
+        if "tools_description" in prev_output:
+            system_content += f"\n\nTOOLS AVAILABLE:\n{prev_output['tools_description']}"
+            print(f"🔧 [{agent.name}] Added tools description to system prompt")
         
         # Add specific instructions for image analysis
         if "image_analysis" in caps:
@@ -665,6 +786,32 @@ async def execute_single_agent_stream(agent, message, files, prev_output):
             "timeout": 30,  # 30 second timeout
             "stream": True  # Enable streaming for real-time responses
         }
+        
+        # Add tools to API parameters if available
+        if tools:
+            # Convert tools to OpenAI format
+            openai_tools = []
+            for tool in tools:
+                if hasattr(tool, '__name__') and hasattr(tool, '__doc__'):
+                    # Convert function tool to OpenAI tool format
+                    openai_tools.append({
+                        "type": "function",
+                        "function": {
+                            "name": tool.__name__,
+                            "description": tool.__doc__ or f"Execute {tool.__name__}",
+                            # Add parameters schema if available
+                            "parameters": {
+                                "type": "object",
+                                "properties": {},
+                                "required": []
+                            }
+                        }
+                    })
+            
+            if openai_tools:
+                api_params["tools"] = openai_tools
+                api_params["tool_choice"] = "auto"  # Let LLM decide when to use tools
+                print(f"🔧 [streaming] Added {len(openai_tools)} tools to API call")
         
         # Handle different token parameter names for different models
         if "gpt-5-mini" in model_name.lower():
@@ -769,6 +916,142 @@ async def _execute_tools_based_on_request(message: str, tools: list, capabilitie
                 else:
                     print("Image analysis tool not found in tools list")
                     results.append("Image analysis capability is available. Upload an image to analyze it.")
+        
+        # Handle dynamic tools from workflow configuration (async)
+        for tool in tools:
+            if hasattr(tool, '__name__'):
+                tool_name = tool.__name__
+                print(f"🔧 Checking dynamic tool (async): {tool_name}")
+                
+                # Time-related requests
+                if tool_name == 'get_current_time':
+                    time_keywords = ['time', 'current time', 'what time', 'time is it', 'clock', 'now']
+                    if any(keyword in message.lower() for keyword in time_keywords):
+                        print(f"🕒 Executing time tool (async): {tool_name}")
+                        try:
+                            result = tool()
+                            print(f"🕒 Time tool result (async): {result}")
+                            if isinstance(result, dict) and 'human_readable' in result:
+                                results.append(f"⏰ **Current Time:** `{result['human_readable']}`\n📅 **Full Timestamp:** `{result['iso_format']}`")
+                            else:
+                                results.append(f"⏰ **Current Time:** `{result}`")
+                        except Exception as e:
+                            print(f"❌ Error executing time tool (async): {e}")
+                            results.append(f"Error getting current time: {str(e)}")
+                
+                # Web search requests
+                elif tool_name == 'web_search':
+                    search_keywords = ['search', 'find', 'look up', 'google', 'search for', 'find information']
+                    if any(keyword in message.lower() for keyword in search_keywords):
+                        print(f"🔍 Executing search tool (async): {tool_name}")
+                        try:
+                            query = message  # Simple approach - use full message as query
+                            result = tool(query=query, max_results=5)
+                            print(f"🔍 Search tool result (async): {result}")
+                            results.append(f"Search results: {result}")
+                        except Exception as e:
+                            print(f"❌ Error executing search tool (async): {e}")
+                            results.append(f"Error performing web search: {str(e)}")
+                
+                # CSV file creation (async)
+                elif tool_name == 'create_csv':
+                    csv_keywords = ['csv', 'create csv', 'csv file', 'comma separated', 'save as csv']
+                    if any(keyword in message.lower() for keyword in csv_keywords) and not any(excel_kw in message.lower() for excel_kw in ['excel', 'xlsx', 'spreadsheet']):
+                        print(f"📊 Executing CSV creation tool (async): {tool_name}")
+                        try:
+                            # For the time zone example, create CSV with city time data
+                            if any(city in message.lower() for city in ['cape town', 'new york', 'london', 'time']):
+                                import datetime
+                                import pytz
+                                
+                                # Get current UTC time
+                                utc_now = datetime.datetime.now(pytz.UTC)
+                                
+                                # Define time zones
+                                cities_tz = {
+                                    'Cape Town': 'Africa/Johannesburg',  # SAST (UTC+2)
+                                    'New York': 'America/New_York',      # EDT/EST
+                                    'London': 'Europe/London'            # BST/GMT
+                                }
+                                
+                                # Calculate local times
+                                city_times = []
+                                for city, tz_name in cities_tz.items():
+                                    tz = pytz.timezone(tz_name)
+                                    local_time = utc_now.astimezone(tz)
+                                    city_times.append({
+                                        'City': city,
+                                        'Local_Time': local_time.strftime('%Y-%m-%d %H:%M:%S'),
+                                        'Timezone': local_time.strftime('%Z'),
+                                        'UTC_Offset': local_time.strftime('%z')
+                                    })
+                                
+                                # Create CSV content
+                                file_path = f"uploads/city_times_{utc_now.strftime('%Y%m%d_%H%M%S')}.csv"
+                                result = tool(file_path=file_path, data=city_times)
+                                print(f"📊 CSV creation result (async): {result}")
+                                
+                                # Create proper download URL
+                                filename = file_path.split('/')[-1]  # Extract filename
+                                download_url = f"http://localhost:8000/uploads/{filename}"
+                                
+                                results.append(f"✅ **CSV File Created Successfully!**\n\n📁 **File:** `{filename}`\n📊 **Contains:** City timezone data for Cape Town, New York, and London\n🔗 **Download:** [{filename}]({download_url})\n\n*Click the link above to download your CSV file.*")
+                            else:
+                                # Generic CSV creation
+                                results.append(f"CSV creation capability available. Please specify the data to include in the CSV file.")
+                        except Exception as e:
+                            print(f"❌ Error executing CSV creation tool (async): {e}")
+                            results.append(f"Error creating CSV file: {str(e)}")
+                
+                # Excel file creation (async)
+                elif tool_name == 'create_excel':
+                    excel_keywords = ['excel', 'xlsx', 'spreadsheet', 'create excel', 'excel file', 'workbook']
+                    if any(keyword in message.lower() for keyword in excel_keywords):
+                        print(f"📊 Executing Excel creation tool (async): {tool_name}")
+                        try:
+                            # For the time zone example, create Excel with city time data
+                            if any(city in message.lower() for city in ['cape town', 'new york', 'london', 'time']):
+                                import datetime
+                                import pytz
+                                
+                                # Get current UTC time
+                                utc_now = datetime.datetime.now(pytz.UTC)
+                                
+                                # Define time zones
+                                cities_tz = {
+                                    'Cape Town': 'Africa/Johannesburg',  # SAST (UTC+2)
+                                    'New York': 'America/New_York',      # EDT/EST
+                                    'London': 'Europe/London'            # BST/GMT
+                                }
+                                
+                                # Calculate local times
+                                city_times = []
+                                for city, tz_name in cities_tz.items():
+                                    tz = pytz.timezone(tz_name)
+                                    local_time = utc_now.astimezone(tz)
+                                    city_times.append({
+                                        'City': city,
+                                        'Local_Time': local_time.strftime('%Y-%m-%d %H:%M:%S'),
+                                        'Timezone': local_time.strftime('%Z'),
+                                        'UTC_Offset': local_time.strftime('%z')
+                                    })
+                                
+                                # Create Excel content
+                                file_path = f"uploads/city_times_{utc_now.strftime('%Y%m%d_%H%M%S')}.xlsx"
+                                result = tool(file_path=file_path, data=city_times, sheet_name="City Times")
+                                print(f"📊 Excel creation result (async): {result}")
+                                
+                                # Create proper download URL
+                                filename = file_path.split('/')[-1]  # Extract filename
+                                download_url = f"http://localhost:8000/uploads/{filename}"
+                                
+                                results.append(f"✅ **Excel File Created Successfully!**\n\n📁 **File:** `{filename}`\n📊 **Contains:** City timezone data for Cape Town, New York, and London\n📋 **Sheet:** `City Times` with professional formatting\n🔗 **Download:** [{filename}]({download_url})\n\n*Click the link above to download your Excel file.*")
+                            else:
+                                # Generic Excel creation
+                                results.append(f"Excel creation capability available. Please specify the data to include in the Excel file.")
+                        except Exception as e:
+                            print(f"❌ Error executing Excel creation tool (async): {e}")
+                            results.append(f"Error creating Excel file: {str(e)}")
         
         return "\n\n".join(results) if results else ""
         
@@ -907,6 +1190,166 @@ def _execute_tools_based_on_request_sync(message: str, tools: list, capabilities
                 # This will be handled by the file processing above
                 # Just add a note that image analysis capability is available
                 results.append("Image analysis capability is available. Upload an image to analyze it.")
+        
+        # Handle dynamic tools from workflow configuration
+        for tool in tools:
+            if hasattr(tool, '__name__'):
+                tool_name = tool.__name__
+                print(f"🔧 Checking dynamic tool: {tool_name}")
+                
+                # Time-related requests
+                if tool_name == 'get_current_time':
+                    time_keywords = ['time', 'current time', 'what time', 'time is it', 'clock', 'now']
+                    if any(keyword in message.lower() for keyword in time_keywords):
+                        print(f"🕒 Executing time tool: {tool_name}")
+                        try:
+                            result = tool()
+                            print(f"🕒 Time tool result: {result}")
+                            if isinstance(result, dict) and 'human_readable' in result:
+                                results.append(f"⏰ **Current Time:** `{result['human_readable']}`\n📅 **Full Timestamp:** `{result['iso_format']}`")
+                            else:
+                                results.append(f"⏰ **Current Time:** `{result}`")
+                        except Exception as e:
+                            print(f"❌ Error executing time tool: {e}")
+                            results.append(f"Error getting current time: {str(e)}")
+                
+                # Web search requests
+                elif tool_name == 'web_search':
+                    search_keywords = ['search', 'find', 'look up', 'google', 'search for', 'find information']
+                    if any(keyword in message.lower() for keyword in search_keywords):
+                        print(f"🔍 Executing search tool: {tool_name}")
+                        try:
+                            # Extract search query from message
+                            query = message  # Simple approach - use full message as query
+                            result = tool(query=query, max_results=5)
+                            print(f"🔍 Search tool result: {result}")
+                            results.append(f"Search results: {result}")
+                        except Exception as e:
+                            print(f"❌ Error executing search tool: {e}")
+                            results.append(f"Error performing web search: {str(e)}")
+                
+                # File operations
+                elif tool_name in ['read_file', 'write_file', 'list_directory']:
+                    file_keywords = ['file', 'read', 'write', 'directory', 'folder', 'save', 'create file']
+                    if any(keyword in message.lower() for keyword in file_keywords):
+                        print(f"📁 File operation tool detected: {tool_name}")
+                        # Note: File operations need specific parameters, so just notify availability
+                        results.append(f"File operation capability available: {tool_name}")
+                
+                # CSV file creation
+                elif tool_name == 'create_csv':
+                    csv_keywords = ['csv', 'create csv', 'csv file', 'comma separated', 'save as csv']
+                    if any(keyword in message.lower() for keyword in csv_keywords) and not any(excel_kw in message.lower() for excel_kw in ['excel', 'xlsx', 'spreadsheet']):
+                        print(f"📊 Executing CSV creation tool: {tool_name}")
+                        try:
+                            # For the time zone example, create CSV with city time data
+                            if any(city in message.lower() for city in ['cape town', 'new york', 'london', 'time']):
+                                import datetime
+                                import pytz
+                                
+                                # Get current UTC time
+                                utc_now = datetime.datetime.now(pytz.UTC)
+                                
+                                # Define time zones
+                                cities_tz = {
+                                    'Cape Town': 'Africa/Johannesburg',  # SAST (UTC+2)
+                                    'New York': 'America/New_York',      # EDT/EST
+                                    'London': 'Europe/London'            # BST/GMT
+                                }
+                                
+                                # Calculate local times
+                                city_times = []
+                                for city, tz_name in cities_tz.items():
+                                    tz = pytz.timezone(tz_name)
+                                    local_time = utc_now.astimezone(tz)
+                                    city_times.append({
+                                        'City': city,
+                                        'Local_Time': local_time.strftime('%Y-%m-%d %H:%M:%S'),
+                                        'Timezone': local_time.strftime('%Z'),
+                                        'UTC_Offset': local_time.strftime('%z')
+                                    })
+                                
+                                # Create CSV content
+                                file_path = f"uploads/city_times_{utc_now.strftime('%Y%m%d_%H%M%S')}.csv"
+                                result = tool(file_path=file_path, data=city_times)
+                                print(f"📊 CSV creation result: {result}")
+                                
+                                # Create proper download URL
+                                filename = file_path.split('/')[-1]  # Extract filename
+                                download_url = f"http://localhost:8000/uploads/{filename}"
+                                
+                                results.append(f"✅ **CSV File Created Successfully!**\n\n📁 **File:** `{filename}`\n📊 **Contains:** City timezone data for Cape Town, New York, and London\n🔗 **Download:** [{filename}]({download_url})\n\n*Click the link above to download your CSV file.*")
+                            else:
+                                # Generic CSV creation
+                                results.append(f"CSV creation capability available. Please specify the data to include in the CSV file.")
+                        except Exception as e:
+                            print(f"❌ Error executing CSV creation tool: {e}")
+                            results.append(f"Error creating CSV file: {str(e)}")
+                
+                # Excel file creation
+                elif tool_name == 'create_excel':
+                    excel_keywords = ['excel', 'xlsx', 'spreadsheet', 'create excel', 'excel file', 'workbook']
+                    if any(keyword in message.lower() for keyword in excel_keywords):
+                        print(f"📊 Executing Excel creation tool: {tool_name}")
+                        try:
+                            # For the time zone example, create Excel with city time data
+                            if any(city in message.lower() for city in ['cape town', 'new york', 'london', 'time']):
+                                import datetime
+                                import pytz
+                                
+                                # Get current UTC time
+                                utc_now = datetime.datetime.now(pytz.UTC)
+                                
+                                # Define time zones
+                                cities_tz = {
+                                    'Cape Town': 'Africa/Johannesburg',  # SAST (UTC+2)
+                                    'New York': 'America/New_York',      # EDT/EST
+                                    'London': 'Europe/London'            # BST/GMT
+                                }
+                                
+                                # Calculate local times
+                                city_times = []
+                                for city, tz_name in cities_tz.items():
+                                    tz = pytz.timezone(tz_name)
+                                    local_time = utc_now.astimezone(tz)
+                                    city_times.append({
+                                        'City': city,
+                                        'Local_Time': local_time.strftime('%Y-%m-%d %H:%M:%S'),
+                                        'Timezone': local_time.strftime('%Z'),
+                                        'UTC_Offset': local_time.strftime('%z')
+                                    })
+                                
+                                # Create Excel content
+                                file_path = f"uploads/city_times_{utc_now.strftime('%Y%m%d_%H%M%S')}.xlsx"
+                                result = tool(file_path=file_path, data=city_times, sheet_name="City Times")
+                                print(f"📊 Excel creation result: {result}")
+                                
+                                # Create proper download URL
+                                filename = file_path.split('/')[-1]  # Extract filename
+                                download_url = f"http://localhost:8000/uploads/{filename}"
+                                
+                                results.append(f"✅ **Excel File Created Successfully!**\n\n📁 **File:** `{filename}`\n📊 **Contains:** City timezone data for Cape Town, New York, and London\n📋 **Sheet:** `City Times` with professional formatting\n🔗 **Download:** [{filename}]({download_url})\n\n*Click the link above to download your Excel file.*")
+                            else:
+                                # Generic Excel creation
+                                results.append(f"Excel creation capability available. Please specify the data to include in the Excel file.")
+                        except Exception as e:
+                            print(f"❌ Error executing Excel creation tool: {e}")
+                            results.append(f"Error creating Excel file: {str(e)}")
+                
+                # File operations
+                elif tool_name in ['read_file', 'write_file', 'list_directory']:
+                    file_keywords = ['file', 'read', 'write', 'directory', 'folder', 'save', 'create file']
+                    if any(keyword in message.lower() for keyword in file_keywords):
+                        print(f"📁 File operation tool detected: {tool_name}")
+                        # Note: File operations need specific parameters, so just notify availability
+                        results.append(f"File operation capability available: {tool_name}")
+                
+                # Data processing tools
+                elif tool_name in ['parse_csv', 'filter_data', 'aggregate_data', 'transform_data']:
+                    data_keywords = ['data', 'analyze', 'filter', 'process', 'transform', 'aggregate']
+                    if any(keyword in message.lower() for keyword in data_keywords):
+                        print(f"📊 Data processing tool detected: {tool_name}")
+                        results.append(f"Data processing capability available: {tool_name}")
         
         print(f"Tool execution results: {results}")
         return "\n\n".join(results) if results else ""

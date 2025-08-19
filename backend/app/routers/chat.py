@@ -5,6 +5,7 @@ from ..db.database import get_db
 from ..db import models
 from ..schemas.chat import ChatRequest, ChatResponse
 from ..services.orchestrator import run_agent, run_orchestrator_agent
+from ..services.tool_loader import create_tool_loader, get_tools_description_for_llm
 import json
 import asyncio
 import uuid
@@ -35,20 +36,113 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
         if not user_input:
             raise HTTPException(status_code=400, detail="No input provided")
         
-        # Find the starting point (agent node)
+        # Find the starting point - prioritize persona_router over regular agents
         agent_node = None
+        persona_router_node = None
+        
+        # First pass: look for persona_router specifically
         for node in nodes:
-            if node.get("type") == "agent":
-                agent_node = node
+            if node.get("type") == "persona_router":
+                persona_router_node = node
                 break
         
-        if not agent_node:
-            raise HTTPException(status_code=400, detail="No agent node found in workflow")
+        # Second pass: if no persona_router found, look for regular agent
+        if not persona_router_node:
+            for node in nodes:
+                if node.get("type") == "agent":
+                    agent_node = node
+                    break
         
-        # Find connected LLM node
+        if not agent_node and not persona_router_node:
+            raise HTTPException(status_code=400, detail="No agent or persona router node found in workflow")
+        
+        # Use persona router if available, otherwise regular agent
+        primary_node = persona_router_node if persona_router_node else agent_node
+        
+        # Log the workflow starting point for debugging
+        if persona_router_node:
+            print(f"\n🎭 WORKFLOW: Starting with Persona Router '{persona_router_node.get('data', {}).get('name', 'Unnamed Router')}'")
+        elif agent_node:
+            print(f"\n🤖 WORKFLOW: Starting with regular Agent '{agent_node.get('data', {}).get('name', 'Unnamed Agent')}'")
+        else:
+            print(f"\n⚠️ WORKFLOW: No valid starting point found")
+        
+        # Handle persona router orchestrator pattern
+        if persona_router_node:
+            from ..services.persona_router import route_to_agent
+            
+            try:
+                # Find all connected agents (connections FROM persona router TO agents)
+                connected_agents = []
+                persona_router_id = persona_router_node.get("id")
+                
+                for connection in connections:
+                    if (connection.get("source") == persona_router_id and 
+                        any(n.get("id") == connection.get("target") and n.get("type") == "agent" for n in nodes)):
+                        agent_node_connected = next(n for n in nodes if n.get("id") == connection.get("target"))
+                        connected_agents.append(agent_node_connected)
+                
+                if not connected_agents:
+                    raise HTTPException(status_code=400, detail="No agents connected to persona router")
+                
+                # Find LLM node for persona router to use for intelligent routing
+                llm_node_for_router = None
+                for connection in connections:
+                    if (connection.get("source") == persona_router_id and 
+                        any(n.get("id") == connection.get("target") and n.get("type") == "llm" for n in nodes)):
+                        llm_node_for_router = next(n for n in nodes if n.get("id") == connection.get("target"))
+                        break
+                
+                # Route user input to appropriate connected agent (pass LLM config for intelligent routing)
+                router_config = persona_router_node.get("data", {})
+                if llm_node_for_router:
+                    router_config["_llm_node"] = llm_node_for_router  # Pass LLM node for intelligent routing
+                
+                routing_result = route_to_agent(user_input, router_config, connected_agents, nodes, connections)
+                selected_agent = routing_result["agent"]
+                
+                print("\n" + "="*60)
+                print("🎭 PERSONA ROUTER ORCHESTRATION")
+                print("="*60)
+                print(f"📋 Available agents: {[a.get('data', {}).get('name', 'Unnamed') for a in connected_agents]}")
+                print(f"🎯 Selected agent: '{selected_agent['data'].get('name', 'Unnamed')}' (ID: {selected_agent['id']})")
+                print(f"📊 Confidence: {routing_result['confidence']:.2f}")
+                print(f"🔧 Method: {routing_result['method']}")
+                print(f"🔄 Fallback used: {routing_result.get('fallback_used', False)}")
+                if 'reasoning' in routing_result:
+                    print(f"💭 Reasoning: {routing_result['reasoning']}")
+                print("="*60)
+                
+                # Create a temporary agent using the selected agent's configuration
+                temp_agent = models.Agent(
+                    id=uuid.uuid4(),
+                    name=selected_agent.get('data', {}).get('name', 'Selected Agent'),
+                    description=selected_agent.get('data', {}).get('description', 'Agent selected by persona router'),
+                    system_prompt=selected_agent.get('data', {}).get('systemPrompt', 'You are a helpful AI assistant.'),
+                    status=models.AgentStatus.active
+                )
+                
+                # Override agent_node for LLM connection search (search from persona router)
+                agent_node = {
+                    "id": persona_router_node.get("id"),
+                    "type": "persona_router",
+                    "data": {
+                        "name": f"{persona_router_node.get('data', {}).get('name', 'Persona Router')} → {temp_agent.name}",
+                        "systemPrompt": temp_agent.system_prompt,
+                        "selectedAgent": selected_agent,
+                        "routingResult": routing_result
+                    }
+                }
+                
+            except Exception as e:
+                print(f"Persona router orchestration failed: {e}")
+                raise HTTPException(status_code=400, detail=f"Persona router orchestration failed: {str(e)}")
+        
+        # Find connected LLM node (search from primary_node)
         llm_node = None
+        search_node_id = primary_node.get("id")
         for connection in connections:
-            if (connection.get("source") == agent_node.get("id") and 
+            if (connection.get("source") == search_node_id and 
                 any(n.get("id") == connection.get("target") and n.get("type") == "llm" for n in nodes)):
                 llm_node = next(n for n in nodes if n.get("id") == connection.get("target"))
                 break
@@ -59,19 +153,24 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
         # Find connected memory node
         memory_node = None
         for connection in connections:
-            if (connection.get("source") == agent_node.get("id") and 
+            if (connection.get("source") == search_node_id and 
                 any(n.get("id") == connection.get("target") and n.get("type") == "memory" for n in nodes)):
                 memory_node = next(n for n in nodes if n.get("id") == connection.get("target"))
                 break
         
         # Create a temporary agent record for execution
-        temp_agent = models.Agent(
-            id=uuid.uuid4(),
-            name=agent_node.get("data", {}).get("name", "Workflow Agent"),
-            description=agent_node.get("data", {}).get("description", "Temporary agent for workflow execution"),
-            system_prompt=agent_node.get("data", {}).get("systemPrompt", ""),
-            status=models.AgentStatus.active
-        )
+        if persona_router_node:
+            # Agent was already created during persona routing
+            pass  # temp_agent already exists
+        else:
+            # Create regular agent
+            temp_agent = models.Agent(
+                id=uuid.uuid4(),
+                name=agent_node.get("data", {}).get("name", "Workflow Agent"),
+                description=agent_node.get("data", {}).get("description", "Temporary agent for workflow execution"),
+                system_prompt=agent_node.get("data", {}).get("systemPrompt", ""),
+                status=models.AgentStatus.active
+            )
         
         # Create LLM config - check for saved config first
         saved_config_id = llm_node.get("data", {}).get("savedConfigId")
@@ -98,15 +197,16 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
         # Always provide conversation context to the agent (built-in feature)
         prev_output = {"attachments": [], "response": ""}
         
-        print(f"=== WORKFLOW DEBUG ===")
-        print(f"Agent node: {agent_node.get('id')} - {agent_node.get('data', {}).get('name', 'Unknown')}")
-        print(f"LLM node: {llm_node.get('id')} - {llm_node.get('data', {}).get('model', 'Unknown')}")
-        print(f"Memory node: {memory_node.get('id') if memory_node else 'None'} - {memory_node.get('data', {}).get('type', 'None') if memory_node else 'None'}")
-        if memory_node:
-            print(f"Memory node data: {memory_node.get('data', {})}")
-        print(f"Conversation history length: {len(conversation_history)}")
+        print("\n" + "="*50)
+        print("🔧 WORKFLOW CONFIGURATION")
+        print("="*50)
+        print(f"🤖 Agent: '{agent_node.get('data', {}).get('name', 'Unknown')}' ({agent_node.get('id')})")
+        print(f"🧠 LLM: {llm_node.get('data', {}).get('model', 'Unknown')} ({llm_node.get('id')})")
+        print(f"💾 Memory: {memory_node.get('data', {}).get('type', 'None') if memory_node else 'None'} ({memory_node.get('id') if memory_node else 'None'})")
+        print(f"📚 Conversation History: {len(conversation_history)} messages")
         connection_strs = [f"{c.get('source')}->{c.get('target')}" for c in connections]
-        print(f"Connections: {connection_strs}")
+        print(f"🔗 Connections: {len(connections)} total")
+        print("="*50)
         
         # Always provide conversation context (agent-level memory)
         if conversation_history:
@@ -114,10 +214,10 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
             max_conversations = agent_node.get("data", {}).get("maxConversations", 10)
             include_system = agent_node.get("data", {}).get("includeSystemMessages", True)
             
-            print(f"Agent conversation memory settings:")
-            print(f"  - Max conversations: {max_conversations}")
-            print(f"  - Include system messages: {include_system}")
-            print(f"  - Available history: {len(conversation_history)}")
+            print(f"📋 Agent Memory Settings:")
+            print(f"   • Max conversations: {max_conversations}")
+            print(f"   • Include system messages: {include_system}")
+            print(f"   • Available history: {len(conversation_history)}")
             
             # Limit conversation history based on agent configuration
             limited_history = conversation_history[-max_conversations:] if conversation_history else []
@@ -126,12 +226,9 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
                 prev_output["conversation_history"] = limited_history
                 prev_output["include_system_messages"] = include_system
                 prev_output["memory_strategy"] = "sliding_window"
-                print(f"  - Limited history: {len(limited_history)} turns")
-                print(f"  - prev_output keys: {list(prev_output.keys())}")
+                print(f"   • Limited history: {len(limited_history)} turns loaded")
             else:
-                print(f"  - No conversation history available")
-        else:
-            print(f"No conversation history available")
+                print(f"   • No conversation history available")
         
         # Handle additional memory components (RAG, vector search, etc.)
         if memory_node and memory_node.get("data", {}).get("type") != "conversation":
@@ -146,13 +243,32 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
         
         print(f"=== END WORKFLOW DEBUG ===")
         
+        # Load tools for the workflow
+        tool_loader = create_tool_loader(db)
+        workflow_tools = tool_loader.get_tools_for_workflow(nodes)
+        
+        # Add tool information to prev_output for agent execution
+        if workflow_tools:
+            tools_description = get_tools_description_for_llm(workflow_tools)
+            prev_output["available_tools"] = workflow_tools
+            prev_output["tools_description"] = tools_description
+            print(f"\n🔧 TOOL LOADING")
+            print(f"   • Available tools: {list(workflow_tools.keys())}")
+            print(f"   • Tools description length: {len(tools_description)} chars")
+        else:
+            print(f"\n🔧 TOOL LOADING")
+            print(f"   • No tools configured for this workflow")
+        
         # Execute the agent using existing infrastructure
         from ..services.orchestrator import execute_single_agent
         
-        print(f"=== CALLING ORCHESTRATOR ===")
-        print(f"prev_output being passed: {prev_output}")
-        print(f"prev_output type: {type(prev_output)}")
-        print(f"prev_output keys: {list(prev_output.keys())}")
+        print("\n" + "="*50)
+        print("🚀 EXECUTING AGENT")
+        print("="*50)
+        print(f"🤖 Agent: '{temp_agent.name}'")
+        print(f"💬 User Input: {user_input[:100]}{'...' if len(user_input) > 100 else ''}")
+        print(f"📝 Memory Context: {len(prev_output.get('conversation_history', []))} previous messages" if prev_output.get('conversation_history') else "📝 Memory Context: None")
+        print("="*50)
         
         result = execute_single_agent(
             agent=temp_agent,
@@ -164,8 +280,9 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
         
-        return {
-            "response": result.get("response", ""),
+        # Prepare response with clean text (no agent prefix in content)
+        response_with_agent_info = {
+            "response": result.get("response", ""),  # Clean response text without agent prefix
             "attachments": result.get("attachments", []),
             "tool_calls": result.get("tool_calls", []),
             "session_id": session_id,
@@ -176,6 +293,16 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
                 "memory_used": memory_node is not None
             }
         }
+        
+        # If persona router was used, include routing information
+        if persona_router_node:
+            response_with_agent_info["workflow_execution"]["router_used"] = True
+            response_with_agent_info["workflow_execution"]["router_name"] = persona_router_node.get('data', {}).get('name', 'Persona Router')
+            response_with_agent_info["workflow_execution"]["selected_agent"] = temp_agent.name
+            response_with_agent_info["workflow_execution"]["routing_method"] = agent_node.get("data", {}).get("routingResult", {}).get("method", "unknown")
+            response_with_agent_info["workflow_execution"]["routing_confidence"] = agent_node.get("data", {}).get("routingResult", {}).get("confidence", 0)
+        
+        return response_with_agent_info
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Workflow execution failed: {str(e)}")
@@ -198,20 +325,100 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
         if not user_input:
             raise HTTPException(status_code=400, detail="No input provided")
         
-        # Find the starting point (agent node)
+        # Find the starting point - prioritize persona_router over regular agents
         agent_node = None
+        persona_router_node = None
+        
+        # First pass: look for persona_router specifically
         for node in nodes:
-            if node.get("type") == "agent":
-                agent_node = node
+            if node.get("type") == "persona_router":
+                persona_router_node = node
                 break
         
-        if not agent_node:
-            raise HTTPException(status_code=400, detail="No agent node found in workflow")
+        # Second pass: if no persona_router found, look for regular agent
+        if not persona_router_node:
+            for node in nodes:
+                if node.get("type") == "agent":
+                    agent_node = node
+                    break
         
-        # Find connected LLM node
+        if not agent_node and not persona_router_node:
+            raise HTTPException(status_code=400, detail="No agent or persona router node found in workflow")
+        
+        # Use persona router if available, otherwise regular agent
+        primary_node = persona_router_node if persona_router_node else agent_node
+        
+        # Log the workflow starting point for debugging
+        if persona_router_node:
+            print(f"\n🎭 WORKFLOW: Starting with Persona Router '{persona_router_node.get('data', {}).get('name', 'Unnamed Router')}'")
+        elif agent_node:
+            print(f"\n🤖 WORKFLOW: Starting with regular Agent '{agent_node.get('data', {}).get('name', 'Unnamed Agent')}'")
+        else:
+            print(f"\n⚠️ WORKFLOW: No valid starting point found")
+        
+        # Handle persona router orchestrator pattern
+        if persona_router_node:
+            from ..services.persona_router import route_to_agent
+            
+            try:
+                # Find all connected agents (connections FROM persona router TO agents)
+                connected_agents = []
+                persona_router_id = persona_router_node.get("id")
+                
+                for connection in connections:
+                    if (connection.get("source") == persona_router_id and 
+                        any(n.get("id") == connection.get("target") and n.get("type") == "agent" for n in nodes)):
+                        agent_node_connected = next(n for n in nodes if n.get("id") == connection.get("target"))
+                        connected_agents.append(agent_node_connected)
+                
+                if not connected_agents:
+                    raise HTTPException(status_code=400, detail="No agents connected to persona router")
+                
+                # Find LLM node for persona router to use for intelligent routing
+                llm_node_for_router = None
+                for connection in connections:
+                    if (connection.get("source") == persona_router_id and 
+                        any(n.get("id") == connection.get("target") and n.get("type") == "llm" for n in nodes)):
+                        llm_node_for_router = next(n for n in nodes if n.get("id") == connection.get("target"))
+                        break
+                
+                # Route user input to appropriate connected agent (pass LLM config for intelligent routing)
+                router_config = persona_router_node.get("data", {})
+                if llm_node_for_router:
+                    router_config["_llm_node"] = llm_node_for_router  # Pass LLM node for intelligent routing
+                
+                routing_result = route_to_agent(user_input, router_config, connected_agents, nodes, connections)
+                selected_agent = routing_result["agent"]
+                
+                # Create a temporary agent using the selected agent's configuration
+                temp_agent = models.Agent(
+                    id=uuid.uuid4(),
+                    name=selected_agent.get('data', {}).get('name', 'Selected Agent'),
+                    description=selected_agent.get('data', {}).get('description', 'Agent selected by persona router'),
+                    system_prompt=selected_agent.get('data', {}).get('systemPrompt', 'You are a helpful AI assistant.'),
+                    status=models.AgentStatus.active
+                )
+                
+                # Override agent_node for LLM connection search (search from persona router)
+                agent_node = {
+                    "id": persona_router_node.get("id"),
+                    "type": "persona_router",
+                    "data": {
+                        "name": f"{persona_router_node.get('data', {}).get('name', 'Persona Router')} → {temp_agent.name}",
+                        "systemPrompt": temp_agent.system_prompt,
+                        "selectedAgent": selected_agent,
+                        "routingResult": routing_result
+                    }
+                }
+                
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Persona router orchestration failed: {str(e)}")
+        
+        # Find connected LLM node (search from primary_node)
         llm_node = None
+        search_node_id = primary_node.get("id")
         for connection in connections:
-            if (connection.get("source") == agent_node.get("id") and 
+            if (connection.get("source") == search_node_id and 
                 any(n.get("id") == connection.get("target") and n.get("type") == "llm" for n in nodes)):
                 llm_node = next(n for n in nodes if n.get("id") == connection.get("target"))
                 break
@@ -222,19 +429,24 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
         # Find connected memory node
         memory_node = None
         for connection in connections:
-            if (connection.get("source") == agent_node.get("id") and 
+            if (connection.get("source") == search_node_id and 
                 any(n.get("id") == connection.get("target") and n.get("type") == "memory" for n in nodes)):
                 memory_node = next(n for n in nodes if n.get("id") == connection.get("target"))
                 break
         
         # Create a temporary agent record for execution
-        temp_agent = models.Agent(
-            id=uuid.uuid4(),
-            name=agent_node.get("data", {}).get("name", "Workflow Agent"),
-            description=agent_node.get("data", {}).get("description", "Temporary agent for workflow execution"),
-            system_prompt=agent_node.get("data", {}).get("systemPrompt", ""),
-            status=models.AgentStatus.active
-        )
+        if persona_router_node:
+            # Agent was already created during persona routing
+            pass  # temp_agent already exists
+        else:
+            # Create regular agent
+            temp_agent = models.Agent(
+                id=uuid.uuid4(),
+                name=agent_node.get("data", {}).get("name", "Workflow Agent"),
+                description=agent_node.get("data", {}).get("description", "Temporary agent for workflow execution"),
+                system_prompt=agent_node.get("data", {}).get("systemPrompt", ""),
+                status=models.AgentStatus.active
+            )
         
         # Create LLM config - check for saved config first
         saved_config_id = llm_node.get("data", {}).get("savedConfigId")
@@ -273,8 +485,32 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
                 prev_output["include_system_messages"] = include_system
                 prev_output["memory_strategy"] = "sliding_window"
         
+        # Load tools for the workflow (streaming)
+        tool_loader = create_tool_loader(db)
+        workflow_tools = tool_loader.get_tools_for_workflow(nodes)
+        
+        # Add tool information to prev_output for agent execution
+        if workflow_tools:
+            tools_description = get_tools_description_for_llm(workflow_tools)
+            prev_output["available_tools"] = workflow_tools
+            prev_output["tools_description"] = tools_description
+            print(f"\n🔧 TOOL LOADING (STREAMING)")
+            print(f"   • Available tools: {list(workflow_tools.keys())}")
+        else:
+            print(f"\n🔧 TOOL LOADING (STREAMING)")
+            print(f"   • No tools configured for this workflow")
+        
         async def generate_stream():
             try:
+                # Send agent information at the start of the stream if persona router was used
+                if persona_router_node:
+                    agent_info = {
+                        'agent_name': temp_agent.name,
+                        'router_used': True,
+                        'agent_header': True  # Signal to frontend to show agent header, no content prefix
+                    }
+                    yield f"data: {json.dumps(agent_info)}\n\n"
+                
                 # Execute the agent using existing streaming infrastructure
                 from ..services.orchestrator import execute_single_agent_stream
                 
@@ -286,8 +522,11 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
                 ):
                     yield f"data: {json.dumps({'content': chunk})}\n\n"
                 
-                # Send completion signal
-                yield f"data: {json.dumps({'done': True})}\n\n"
+                # Send completion signal with agent info
+                completion_data = {'done': True}
+                if persona_router_node:
+                    completion_data['agent_name'] = temp_agent.name
+                yield f"data: {json.dumps(completion_data)}\n\n"
                 
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
