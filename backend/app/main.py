@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from .db.database import engine
 from .db import models
-from .routers import agents, capabilities, chat, files, llm_configs, rag_indexes, orchestrator, workflows, agent_builder, tools
+from .routers import agents, capabilities, chat, files, llm_configs, rag_indexes, orchestrator, workflows, agent_builder, tools, mcp_servers
 import os
 
 app = FastAPI(title="Multi-Agent AI Assistant API", version="1.0.0")
@@ -41,6 +41,7 @@ app.include_router(orchestrator.router)
 app.include_router(workflows.router)
 app.include_router(agent_builder.router)
 app.include_router(tools.router)
+app.include_router(mcp_servers.router)
 
 @app.get("/")
 async def root():

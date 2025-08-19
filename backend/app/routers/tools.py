@@ -4,25 +4,59 @@ from typing import List, Optional
 from ..db.database import get_db
 from ..db import models
 from ..services.tools import TOOL_CATEGORIES, TOOL_METADATA
+from ..services.mcp_manager import MCPManager
 
 router = APIRouter(prefix="/tools", tags=["Tools"])
 
 @router.get("/categories")
-def list_tool_categories(db: Session = Depends(get_db)):
+async def list_tool_categories(db: Session = Depends(get_db)):
     """Get all tool categories."""
     categories = db.query(models.ToolCategory).all()
+    
+    # Get MCP tool counts
+    mcp_tool_count = 0
+    mcp_category_id = None
+    try:
+        mcp_manager = MCPManager(db)
+        active_servers = db.query(models.MCPServer).filter(
+            models.MCPServer.status == models.MCPServerStatus.active
+        ).all()
+        
+        mcp_category = db.query(models.ToolCategory).filter(
+            models.ToolCategory.name == "MCP Tools"
+        ).first()
+        
+        if mcp_category:
+            mcp_category_id = str(mcp_category.id)
+        
+        for server in active_servers:
+            try:
+                mcp_tools = await mcp_manager.get_server_tools(server.id)
+                mcp_tool_count += len(mcp_tools)
+            except Exception:
+                continue
+                
+    except Exception:
+        pass
+    
+    result_categories = []
+    for cat in categories:
+        tool_count = len(cat.tools)
+        # Add MCP tools to the MCP category count
+        if str(cat.id) == mcp_category_id:
+            tool_count += mcp_tool_count
+            
+        result_categories.append({
+            "id": str(cat.id),
+            "name": cat.name,
+            "description": cat.description,
+            "icon": cat.icon,
+            "color": cat.color,
+            "tool_count": tool_count
+        })
+    
     return {
-        "categories": [
-            {
-                "id": str(cat.id),
-                "name": cat.name,
-                "description": cat.description,
-                "icon": cat.icon,
-                "color": cat.color,
-                "tool_count": len(cat.tools)
-            }
-            for cat in categories
-        ]
+        "categories": result_categories
     }
 
 @router.get("/categories/{category_id}")
@@ -56,13 +90,15 @@ def get_tool_category(category_id: str, db: Session = Depends(get_db)):
     }
 
 @router.get("")
-def list_tools(
+async def list_tools(
     category_id: Optional[str] = Query(None, description="Filter by category ID"),
     search: Optional[str] = Query(None, description="Search in tool names and descriptions"),
     is_active: Optional[bool] = Query(True, description="Filter by active status"),
+    include_mcp: Optional[bool] = Query(True, description="Include MCP server tools"),
     db: Session = Depends(get_db)
 ):
-    """Get all tools with optional filtering."""
+    """Get all tools with optional filtering, including MCP server tools."""
+    # Get native tools from database
     query = db.query(models.Tool)
     
     if is_active is not None:
@@ -79,33 +115,114 @@ def list_tools(
             (models.Tool.description.ilike(search_filter))
         )
     
-    tools = query.all()
+    native_tools = query.all()
+    
+    # Convert native tools to response format
+    tools_list = [
+        {
+            "id": str(tool.id),
+            "name": tool.name,
+            "display_name": tool.display_name,
+            "description": tool.description,
+            "category": {
+                "id": str(tool.category.id),
+                "name": tool.category.name,
+                "icon": tool.category.icon,
+                "color": tool.category.color
+            },
+            "parameters": tool.parameters,
+            "examples": tool.examples,
+            "is_active": tool.is_active,
+            "is_builtin": tool.is_builtin,
+            "version": tool.version,
+            "usage_count": tool.usage_count,
+            "success_rate": (tool.success_count / max(tool.usage_count, 1)) * 100 if tool.usage_count > 0 else 0,
+            "avg_execution_time_ms": tool.avg_execution_time_ms,
+            "source": "native"
+        }
+        for tool in native_tools
+    ]
+    
+    # Add MCP tools if requested and available
+    if include_mcp:
+        try:
+            mcp_manager = MCPManager(db)
+            
+            # Get active MCP servers
+            active_servers = db.query(models.MCPServer).filter(
+                models.MCPServer.status == models.MCPServerStatus.active
+            ).all()
+            
+            # Get MCP category (create if doesn't exist)
+            mcp_category = db.query(models.ToolCategory).filter(
+                models.ToolCategory.name == "MCP Tools"
+            ).first()
+            
+            if not mcp_category:
+                mcp_category = models.ToolCategory(
+                    name="MCP Tools",
+                    description="Tools provided by Model Context Protocol servers",
+                    icon="🔗",
+                    color="#3f51b5"
+                )
+                db.add(mcp_category)
+                db.commit()
+                db.refresh(mcp_category)
+            
+            for server in active_servers:
+                try:
+                    # Get tools from this MCP server
+                    mcp_tools = await mcp_manager.get_server_tools(server.id)
+                    
+                    for tool_name, tool_info in mcp_tools.items():
+                        # Apply search filter to MCP tools if specified
+                        if search:
+                            search_lower = search.lower()
+                            if not (search_lower in tool_name.lower() or 
+                                   search_lower in tool_info.get('description', '').lower()):
+                                continue
+                        
+                        # Apply category filter
+                        if category_id and str(mcp_category.id) != category_id:
+                            continue
+                        
+                        # Convert MCP tool to standard format
+                        mcp_tool = {
+                            "id": f"mcp_{server.id}_{tool_name}",
+                            "name": tool_name,
+                            "display_name": tool_info.get('displayName', tool_name),
+                            "description": tool_info.get('description', f'Tool from {server.name} MCP server'),
+                            "category": {
+                                "id": str(mcp_category.id),
+                                "name": mcp_category.name,
+                                "icon": mcp_category.icon,
+                                "color": mcp_category.color
+                            },
+                            "parameters": tool_info.get('inputSchema', {}).get('properties', []),
+                            "examples": [],
+                            "is_active": True,
+                            "is_builtin": False,
+                            "version": "1.0.0",
+                            "usage_count": 0,
+                            "success_rate": 0,
+                            "avg_execution_time_ms": None,
+                            "source": "mcp",
+                            "mcp_server_id": server.id,
+                            "mcp_server_name": server.name
+                        }
+                        
+                        tools_list.append(mcp_tool)
+                        
+                except Exception as e:
+                    print(f"Error getting tools from MCP server {server.name}: {e}")
+                    continue
+                    
+        except Exception as e:
+            print(f"Error loading MCP tools: {e}")
     
     return {
-        "tools": [
-            {
-                "id": str(tool.id),
-                "name": tool.name,
-                "display_name": tool.display_name,
-                "description": tool.description,
-                "category": {
-                    "id": str(tool.category.id),
-                    "name": tool.category.name,
-                    "icon": tool.category.icon,
-                    "color": tool.category.color
-                },
-                "parameters": tool.parameters,
-                "examples": tool.examples,
-                "is_active": tool.is_active,
-                "is_builtin": tool.is_builtin,
-                "version": tool.version,
-                "usage_count": tool.usage_count,
-                "success_rate": (tool.success_count / max(tool.usage_count, 1)) * 100 if tool.usage_count > 0 else 0,
-                "avg_execution_time_ms": tool.avg_execution_time_ms
-            }
-            for tool in tools
-        ],
-        "total": len(tools)
+        "tools": tools_list,
+        "total": len(tools_list)
     }
 
 @router.get("/{tool_id}")

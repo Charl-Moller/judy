@@ -86,6 +86,36 @@ class File(Base):
     uploaded_at = Column(DateTime, default=datetime.utcnow)
 
 
+class MCPServerStatus(str, enum.Enum):
+    active = "active"
+    inactive = "inactive" 
+    error = "error"
+    connecting = "connecting"
+
+class MCPTransportType(str, enum.Enum):
+    sse = "sse"
+    stdio = "stdio"
+    http = "http"
+
+class MCPServer(Base):
+    __tablename__ = "mcp_servers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    transport = Column(Enum(MCPTransportType), nullable=False)
+    url = Column(String)  # For SSE and HTTP transports
+    command = Column(String)  # For stdio transport
+    auth_token = Column(String)  # Optional authentication token
+    status = Column(Enum(MCPServerStatus), default=MCPServerStatus.inactive)
+    tools_count = Column(Integer, default=0)
+    error_message = Column(Text)
+    last_connected_at = Column(DateTime)
+    tools_discovered_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
