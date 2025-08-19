@@ -19,7 +19,7 @@ import {
   Storage as MemoryIcon,
   PlayArrow as TriggerIcon,
   Output as OutputIcon,
-  AccountTree as OrchestratorIcon
+  AccountTree as OrchestratorIcon,
 } from '@mui/icons-material'
 import { useNodeConfig } from '../../context/NodeConfigContext'
 import { useFlow } from '../../context/FlowContext'

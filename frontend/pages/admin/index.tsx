@@ -13,6 +13,7 @@ export default function AdminHome() {
         <AdminCard title="LLM Configs" href="/admin/llm-configs" description="Model settings"/>
         <AdminCard title="Capabilities" href="/admin/capabilities" description="Tools available to agents"/>
         <AdminCard title="RAG Indexes" href="/admin/rag-indexes" description="Azure Cognitive Search indexes"/>
+        <AdminCard title="🔗 MCP Servers" href="/admin/mcp-servers" description="Model Context Protocol server connections"/>
         <AdminCard title="Files" href="/admin/files" description="Upload and manage files"/>
       </div>
     </div>

@@ -22,7 +22,7 @@ import {
   PlayArrow as TriggerIcon,
   Output as OutputIcon,
   AccountTree as OrchestratorIcon,
-  Masks as PersonaIcon
+  Masks as PersonaIcon,
 } from '@mui/icons-material'
 import { useFlow } from '../../context/FlowContext'
 import { useNodeConfig } from '../../context/NodeConfigContext'
@@ -273,7 +273,7 @@ const AgentNode: React.FC<AgentNodeProps> = ({ data, selected, id }) => {
     const nodeType = data.nodeType
     const handles = []
 
-    // Single top connector for LLM, Tool, Memory components
+    // Single top connector for LLM, Tool, Memory, MCP Server components
     if (nodeType === 'llm' || nodeType === 'tool' || nodeType === 'memory') {
       handles.push(
         <div key="connector-top-wrapper" style={{ position: 'absolute', top: -8, left: '50%', transform: 'translateX(-50%)' }}>
