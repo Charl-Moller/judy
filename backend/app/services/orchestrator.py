@@ -650,6 +650,17 @@ DO NOT give up after one failed attempt. Always try at least 2-3 different appro
                 full_response = final_content
         
         print(f"🎯 [{agent.name}] Response preview: {full_response[:100] if full_response else 'None'}{'...' if full_response and len(full_response) > 100 else ''}")
+        
+        # SELF-CORRECTION MECHANISM: Check if agent made promises without executing them
+        if full_response and tools:
+            correction_needed = _check_for_unfulfilled_promises(full_response, agent.name)
+            if correction_needed:
+                print(f"🔧 [{agent.name}] Self-correction needed: Agent made promises without execution")
+                corrected_response = _force_promise_execution(full_response, tools, client, api_params, agent.name)
+                if corrected_response:
+                    full_response = corrected_response
+                    print(f"✅ [{agent.name}] Self-correction applied successfully")
+        
         print("\n" + "="*60)
         print("🎉 AGENT EXECUTION COMPLETE")
         print("="*60)
@@ -1726,3 +1737,92 @@ def run_orchestrator_agent(message: str, files: list[str] = None, session_id: st
         }
     finally:
         db.close()
+
+
+def _check_for_unfulfilled_promises(response: str, agent_name: str) -> bool:
+    """Check if agent response contains promises to execute tools without actually executing them"""
+    
+    # Patterns that indicate the agent is describing what it will do rather than what it did
+    promise_patterns = [
+        r"I will\s+(search|look|check|execute|retrieve|find)",
+        r"Next,?\s+I will\s+(search|look|check|execute|retrieve|find)",
+        r"I'll\s+(search|look|check|execute|retrieve|find)",
+        r"Let me\s+(search|look|check|execute|retrieve|find)",
+        r"I am going to\s+(search|look|check|execute|retrieve|find)",
+        r"Please hold while I\s+(search|look|check|execute|retrieve|find|retrieve)",
+        r"I will now\s+(search|look|check|execute|retrieve|find)",
+        r"Next step.+(?:search|execute|check|retrieve)",
+        r"(?:if|when) (?:this|that) (?:fails|doesn't work|returns no results).+I will"
+    ]
+    
+    # Evidence that agent actually executed tools
+    execution_evidence = [
+        r"(?:Found|Retrieved|Discovered)\s+\d+\s+(?:incidents?|users?|records?)",
+        r"(?:Results?|Data|Information):\s*
+",
+        r"(?:INC|TASK|REQ)\d+",  # ServiceNow ticket numbers
+        r"(?:Assigned to|Priority|Status|State):\s*\w+",
+        r"No (?:incidents?|results?|records?) found matching"
+    ]
+    
+    # Check for promise patterns
+    has_promises = any(re.search(pattern, response, re.IGNORECASE) for pattern in promise_patterns)
+    
+    # Check for execution evidence
+    has_evidence = any(re.search(pattern, response, re.IGNORECASE) for pattern in execution_evidence)
+    
+    if has_promises and not has_evidence:
+        print(f"🔍 [{agent_name}] Promise detected without execution evidence")
+        print(f"    Promises found: {[pattern for pattern in promise_patterns if re.search(pattern, response, re.IGNORECASE)]}")
+        return True
+    
+    return False
+
+
+def _force_promise_execution(response: str, tools: list, client, api_params: dict, agent_name: str) -> str:
+    """Force execution of promised actions by re-prompting the agent"""
+    
+    correction_prompt = f"""
+SELF-CORRECTION REQUIRED:
+
+Your previous response described actions you would take but did not actually execute them:
+"{response[:200]}..."
+
+You MUST now execute the tools you promised to use. Based on your previous response, you should:
+1. Actually call the specific tools you mentioned
+2. Use the exact search parameters you described
+3. Show the real results from those tool calls
+4. Provide concrete data, not promises
+
+Execute the tools NOW and provide the actual results.
+"""
+    
+    try:
+        # Create a correction message
+        correction_messages = [
+            {"role": "system", "content": "You must execute tools to get real data. Do not describe what you will do - actually do it."},
+            {"role": "user", "content": correction_prompt}
+        ]
+        
+        # Update API params for correction call
+        correction_params = api_params.copy()
+        correction_params["messages"] = correction_messages
+        
+        print(f"🔧 [{agent_name}] Forcing tool execution with correction prompt")
+        
+        # Make the correction call
+        correction_response = client.chat.completions.create(**correction_params)
+        correction_content = correction_response.choices[0].message.content
+        correction_tool_calls = correction_response.choices[0].message.tool_calls if hasattr(correction_response.choices[0].message, 'tool_calls') else None
+        
+        if correction_tool_calls:
+            print(f"✅ [{agent_name}] Correction successful: {len(correction_tool_calls)} tools executed")
+            return correction_content
+        else:
+            print(f"⚠️ [{agent_name}] Correction attempt did not result in tool calls")
+            return None
+            
+    except Exception as e:
+        print(f"❌ [{agent_name}] Self-correction failed: {e}")
+        return None
+

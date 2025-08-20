@@ -258,6 +258,34 @@ const TestPanel: React.FC = () => {
             }
           }
           
+          // Log tool execution details if available
+          if (result.tool_calls && result.tool_calls.length > 0) {
+            addLog({
+              level: 'info',
+              message: `🔧 Executed ${result.tool_calls.length} tool(s):`
+            })
+            result.tool_calls.forEach((toolCall: any, index: number) => {
+              addLog({
+                level: 'debug',
+                message: `  ${index + 1}. ${toolCall.tool_name || 'unknown'} ${toolCall.parameters ? `with params: ${JSON.stringify(toolCall.parameters).substring(0, 100)}...` : ''}`
+              })
+            })
+          } else {
+            addLog({
+              level: 'warning',
+              message: '⚠️ No tools were executed during this request'
+            })
+          }
+          
+          // Log execution statistics
+          if (result.workflow_execution) {
+            const exec = result.workflow_execution
+            addLog({
+              level: 'debug',
+              message: `📊 Execution Stats: LLM=${exec.llm_model}, Provider=${exec.provider}, Memory=${exec.memory_used ? 'Yes' : 'No'}`
+            })
+          }
+          
           addLog({
             level: 'info',
             message: '✅ API execution completed successfully'
