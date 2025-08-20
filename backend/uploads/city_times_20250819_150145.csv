@@ -1,0 +1,4 @@
+City,Local_Time,Timezone,UTC_Offset
+Cape Town,2025-08-19 17:01:45,SAST,+0200
+New York,2025-08-19 11:01:45,EDT,-0400
+London,2025-08-19 16:01:45,BST,+0100
