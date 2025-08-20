@@ -265,9 +265,23 @@ const TestPanel: React.FC = () => {
               message: `🔧 Executed ${result.tool_calls.length} tool(s):`
             })
             result.tool_calls.forEach((toolCall: any, index: number) => {
+              // Handle both OpenAI format and simplified format
+              const toolName = toolCall.function?.name || toolCall.tool_name || 'unknown'
+              const toolParams = toolCall.function?.arguments || toolCall.parameters || toolCall.arguments
+              
+              let paramStr = ''
+              if (toolParams) {
+                try {
+                  const parsedParams = typeof toolParams === 'string' ? JSON.parse(toolParams) : toolParams
+                  paramStr = `with params: ${JSON.stringify(parsedParams).substring(0, 100)}...`
+                } catch {
+                  paramStr = `with params: ${String(toolParams).substring(0, 100)}...`
+                }
+              }
+              
               addLog({
                 level: 'debug',
-                message: `  ${index + 1}. ${toolCall.tool_name || 'unknown'} ${toolCall.parameters ? `with params: ${JSON.stringify(toolCall.parameters).substring(0, 100)}...` : ''}`
+                message: `  ${index + 1}. ${toolName} ${paramStr}`
               })
             })
           } else {

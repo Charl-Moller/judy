@@ -555,6 +555,12 @@ DO NOT give up after one failed attempt. Always try at least 2-3 different appro
                 final_content = final_response.choices[0].message.content
                 final_tool_calls = final_response.choices[0].message.tool_calls if hasattr(final_response.choices[0].message, 'tool_calls') else None
                 
+                # Add activity feedback to the response
+                executed_tools = [tc.function.name for tc in tool_calls if hasattr(tc, 'function') and hasattr(tc.function, 'name')]
+                if executed_tools and final_content:
+                    activity_note = f"\n\n*🔧 Executed tools: {', '.join(executed_tools)}*"
+                    final_content = final_content + activity_note
+                
                 print(f"✅ [{agent.name}] Final response after tool execution: {len(final_content) if final_content else 0} characters")
                 
                 # MULTI-STRATEGY EXECUTION: Check if we should try alternative approaches
