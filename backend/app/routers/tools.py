@@ -18,6 +18,7 @@ async def list_tool_categories(db: Session = Depends(get_db)):
     mcp_category_id = None
     try:
         mcp_manager = MCPManager(db)
+        await mcp_manager.initialize()
         active_servers = db.query(models.MCPServer).filter(
             models.MCPServer.status == models.MCPServerStatus.active
         ).all()
@@ -147,6 +148,7 @@ async def list_tools(
     if include_mcp:
         try:
             mcp_manager = MCPManager(db)
+            await mcp_manager.initialize()
             
             # Get active MCP servers
             active_servers = db.query(models.MCPServer).filter(
@@ -214,11 +216,10 @@ async def list_tools(
                         tools_list.append(mcp_tool)
                         
                 except Exception as e:
-                    print(f"Error getting tools from MCP server {server.name}: {e}")
                     continue
                     
         except Exception as e:
-            print(f"Error loading MCP tools: {e}")
+            pass
     
     return {
         "tools": tools_list,

@@ -245,7 +245,7 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
         
         # Load tools for the workflow
         tool_loader = create_tool_loader(db)
-        workflow_tools = tool_loader.get_tools_for_workflow(nodes)
+        workflow_tools = await tool_loader.get_tools_for_workflow(nodes)
         
         # Add tool information to prev_output for agent execution
         if workflow_tools:
@@ -487,7 +487,7 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
         
         # Load tools for the workflow (streaming)
         tool_loader = create_tool_loader(db)
-        workflow_tools = tool_loader.get_tools_for_workflow(nodes)
+        workflow_tools = await tool_loader.get_tools_for_workflow(nodes)
         
         # Add tool information to prev_output for agent execution
         if workflow_tools:

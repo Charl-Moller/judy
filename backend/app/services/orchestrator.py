@@ -288,6 +288,28 @@ def execute_single_agent(agent, message, files, prev_output):
         # Add tool descriptions if available
         if "tools_description" in prev_output:
             system_content += f"\n\nTOOLS AVAILABLE:\n{prev_output['tools_description']}"
+            system_content += """
+
+MULTI-STRATEGY EXECUTION GUIDELINES:
+CRITICAL: You MUST try multiple approaches when your first attempt fails or returns insufficient results.
+
+Strategy Pattern:
+1. First try specific/exact searches with the provided information
+2. If that fails or returns no results, immediately try broader searches  
+3. If still insufficient, try alternative search methods or parameters
+4. Continue until you find useful results or exhaust reasonable options
+
+For ServiceNow searches:
+- ALWAYS use the specific information provided (incident numbers, team names, etc.) in your tool parameters
+- Start with get_incident for specific incident numbers (but pass proper parameters)
+- If that fails, use list_incidents with query parameters containing the incident number
+- Try different query formats: number=INC123, or search in descriptions
+- For team searches, try assignment group names, descriptions, short descriptions
+- Example progression: exact match → contains match → broader search → alternative fields
+
+CRITICAL: Do NOT call tools with empty parameters {}. Always include the relevant search terms from the user's question.
+
+DO NOT give up after one failed attempt. Always try at least 2-3 different approaches."""
             print(f"🔧 [{agent.name}] Added tools description to system prompt")
         
         # Add specific instructions for image analysis
@@ -460,8 +482,26 @@ def execute_single_agent(agent, message, files, prev_output):
                             break
                     
                     if tool_func:
-                        # Execute the tool
-                        result = tool_func(**function_args)
+                        # Execute the tool - check if it's async
+                        import inspect
+                        import asyncio
+                        if inspect.iscoroutinefunction(tool_func):
+                            # Run async function in new event loop
+                            try:
+                                loop = asyncio.get_event_loop()
+                                if loop.is_running():
+                                    # If already in async context, create new loop
+                                    import concurrent.futures
+                                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                                        result = pool.submit(asyncio.run, tool_func(**function_args)).result()
+                                else:
+                                    result = loop.run_until_complete(tool_func(**function_args))
+                            except RuntimeError:
+                                # No event loop, create one
+                                result = asyncio.run(tool_func(**function_args))
+                        else:
+                            result = tool_func(**function_args)
+                        
                         tool_results.append({
                             "tool_call_id": tool_call.id,
                             "result": result
@@ -513,8 +553,100 @@ def execute_single_agent(agent, message, files, prev_output):
                 
                 final_response = client.chat.completions.create(**api_params)
                 final_content = final_response.choices[0].message.content
+                final_tool_calls = final_response.choices[0].message.tool_calls if hasattr(final_response.choices[0].message, 'tool_calls') else None
                 
                 print(f"✅ [{agent.name}] Final response after tool execution: {len(final_content) if final_content else 0} characters")
+                
+                # MULTI-STRATEGY EXECUTION: Check if we should try alternative approaches
+                max_iterations = 3
+                current_iteration = 1
+                
+                while final_tool_calls and current_iteration < max_iterations:
+                    print(f"🔄 [{agent.name}] Iteration {current_iteration + 1}: LLM wants to try additional strategies...")
+                    
+                    # Execute additional tool calls
+                    additional_results = []
+                    for tool_call in final_tool_calls:
+                        try:
+                            function_name = tool_call.function.name
+                            function_args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+                            
+                            print(f"🛠️ [{agent.name}] Executing additional tool: {function_name} with args: {function_args}")
+                            
+                            # Find and execute the tool
+                            tool_func = None
+                            for tool in tools:
+                                if hasattr(tool, '__name__') and tool.__name__ == function_name:
+                                    tool_func = tool
+                                    break
+                            
+                            if tool_func:
+                                import inspect
+                                import asyncio
+                                if inspect.iscoroutinefunction(tool_func):
+                                    try:
+                                        loop = asyncio.get_event_loop()
+                                        if loop.is_running():
+                                            import concurrent.futures
+                                            with concurrent.futures.ThreadPoolExecutor() as pool:
+                                                result = pool.submit(asyncio.run, tool_func(**function_args)).result()
+                                        else:
+                                            result = loop.run_until_complete(tool_func(**function_args))
+                                    except RuntimeError:
+                                        result = asyncio.run(tool_func(**function_args))
+                                else:
+                                    result = tool_func(**function_args)
+                                
+                                additional_results.append({
+                                    "tool_call_id": tool_call.id,
+                                    "result": result
+                                })
+                                print(f"✅ [{agent.name}] Additional tool {function_name} executed successfully")
+                            else:
+                                additional_results.append({
+                                    "tool_call_id": tool_call.id,
+                                    "result": {"error": f"Tool {function_name} not found"}
+                                })
+                        except Exception as e:
+                            print(f"❌ [{agent.name}] Error executing additional tool {tool_call.function.name}: {e}")
+                            additional_results.append({
+                                "tool_call_id": tool_call.id,
+                                "result": {"error": str(e)}
+                            })
+                    
+                    # Add the assistant message with additional tool calls
+                    messages.append({
+                        "role": "assistant", 
+                        "content": final_content,
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            } for tc in final_tool_calls
+                        ]
+                    })
+                    
+                    # Add additional tool results
+                    for additional_result in additional_results:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": additional_result["tool_call_id"],
+                            "content": json.dumps(additional_result["result"])
+                        })
+                    
+                    # Make another call to get refined response
+                    api_params["messages"] = messages
+                    refined_response = client.chat.completions.create(**api_params)
+                    final_content = refined_response.choices[0].message.content
+                    final_tool_calls = refined_response.choices[0].message.tool_calls if hasattr(refined_response.choices[0].message, 'tool_calls') else None
+                    
+                    current_iteration += 1
+                    print(f"✅ [{agent.name}] Iteration {current_iteration} completed: {len(final_content) if final_content else 0} characters")
+                
                 full_response = final_content
         
         print(f"🎯 [{agent.name}] Response preview: {full_response[:100] if full_response else 'None'}{'...' if full_response and len(full_response) > 100 else ''}")
@@ -707,6 +839,28 @@ async def execute_single_agent_stream(agent, message, files, prev_output):
         # Add tool descriptions if available
         if "tools_description" in prev_output:
             system_content += f"\n\nTOOLS AVAILABLE:\n{prev_output['tools_description']}"
+            system_content += """
+
+MULTI-STRATEGY EXECUTION GUIDELINES:
+CRITICAL: You MUST try multiple approaches when your first attempt fails or returns insufficient results.
+
+Strategy Pattern:
+1. First try specific/exact searches with the provided information
+2. If that fails or returns no results, immediately try broader searches  
+3. If still insufficient, try alternative search methods or parameters
+4. Continue until you find useful results or exhaust reasonable options
+
+For ServiceNow searches:
+- ALWAYS use the specific information provided (incident numbers, team names, etc.) in your tool parameters
+- Start with get_incident for specific incident numbers (but pass proper parameters)
+- If that fails, use list_incidents with query parameters containing the incident number
+- Try different query formats: number=INC123, or search in descriptions
+- For team searches, try assignment group names, descriptions, short descriptions
+- Example progression: exact match → contains match → broader search → alternative fields
+
+CRITICAL: Do NOT call tools with empty parameters {}. Always include the relevant search terms from the user's question.
+
+DO NOT give up after one failed attempt. Always try at least 2-3 different approaches."""
             print(f"🔧 [{agent.name}] Added tools description to system prompt")
         
         # Add specific instructions for image analysis

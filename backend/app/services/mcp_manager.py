@@ -10,6 +10,7 @@ from fastmcp import FastMCP, Client
 import httpx
 import json
 import logging
+from datetime import datetime
 from ..db import models
 
 logger = logging.getLogger(__name__)
@@ -38,43 +39,40 @@ class MCPManager:
         # Connect to each server
         for server in mcp_servers:
             try:
-                await self.connect_to_server(server)
+                logger.info(f"🔗 Attempting to connect to {server.name} ({server.transport})")
+                result = await self.connect_to_server(server)
+                if result:
+                    logger.info(f"✅ Successfully connected to {server.name}")
+                    tools_count = len(self.available_tools.get(str(server.id), {}))
+                    logger.info(f"📋 Loaded {tools_count} tools from {server.name}")
+                else:
+                    logger.warning(f"⚠️ Failed to connect to {server.name}")
             except Exception as e:
                 logger.error(f"❌ Failed to connect to MCP server {server.name}: {e}")
         
-        logger.info("✅ MCP Manager initialized successfully")
+        total_tools = sum(len(tools) for tools in self.available_tools.values())
+        logger.info(f"✅ MCP Manager initialized successfully with {total_tools} total tools")
     
     async def connect_to_server(self, server: models.MCPServer) -> bool:
         """Connect to an MCP server and discover its tools"""
         try:
             logger.info(f"🔗 Connecting to MCP server: {server.name} ({server.transport})")
             
-            # Create client based on transport type
-            if server.transport == models.MCPTransportType.sse:
-                client = Client(server.url)
+            if server.transport == models.MCPTransportType.http:
+                # HTTP-based MCP server (like ServiceNow)
+                await self._connect_http_server(server)
+            elif server.transport == models.MCPTransportType.sse:
+                # SSE-based MCP server
+                await self._connect_fastmcp_server(server, "sse")
             elif server.transport == models.MCPTransportType.stdio:
-                client = Client(server.command)  
-            elif server.transport == models.MCPTransportType.http:
-                client = Client(server.url)
+                # stdio-based MCP server
+                await self._connect_fastmcp_server(server, "stdio")
             else:
                 raise ValueError(f"Unsupported transport: {server.transport}")
             
-            # Connect using async context manager
-            await client.__aenter__()
-            
-            if server.auth_token:
-                # Authentication method may vary - this is a placeholder
-                pass
-            
-            # Store the connected client
-            self.connected_clients[str(server.id)] = client
-            
-            # Discover available tools
-            await self.discover_tools(server, client)
-            
             # Update server status
             server.status = models.MCPServerStatus.active
-            server.last_connected_at = models.datetime.utcnow()
+            server.last_connected_at = datetime.utcnow()
             self.db.commit()
             
             logger.info(f"✅ Successfully connected to MCP server: {server.name}")
@@ -87,10 +85,108 @@ class MCPManager:
             self.db.commit()
             return False
     
-    async def discover_tools(self, server: models.MCPServer, client: Client):
-        """Discover and catalog tools available from an MCP server"""
+    async def _connect_http_server(self, server: models.MCPServer):
+        """Connect to HTTP-based MCP server (like ServiceNow)"""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Test connection with health check
+            health_url = f"{server.url}/health"
+            logger.info(f"🏥 Testing health endpoint: {health_url}")
+            
+            headers = {'Content-Type': 'application/json'}
+            if server.auth_token:
+                headers['Authorization'] = f"Bearer {server.auth_token}"
+            
+            try:
+                response = await client.get(health_url, headers=headers)
+                response.raise_for_status()
+                health_data = response.json()
+                logger.info(f"✅ Health check passed: {health_data}")
+            except Exception as e:
+                raise Exception(f"Health check failed: {e}")
+            
+            # Discover tools
+            await self._discover_http_tools(server, client, headers)
+            
+            # Store HTTP client info (we'll create new clients for actual calls)
+            self.connected_clients[str(server.id)] = {
+                'type': 'http',
+                'url': server.url,
+                'headers': headers
+            }
+    
+    async def _connect_fastmcp_server(self, server: models.MCPServer, transport_type: str):
+        """Connect to FastMCP-based server (SSE/stdio)"""
+        # Create client based on transport type
+        if transport_type == "sse":
+            client = Client(server.url)
+        elif transport_type == "stdio":
+            client = Client(server.command)
+        else:
+            raise ValueError(f"Unsupported FastMCP transport: {transport_type}")
+        
+        # Connect using async context manager
+        await client.__aenter__()
+        
+        if server.auth_token:
+            # Authentication method may vary - this is a placeholder
+            pass
+        
+        # Store the connected client
+        self.connected_clients[str(server.id)] = client
+        
+        # Discover available tools using FastMCP method
+        await self._discover_fastmcp_tools(server, client)
+    
+    async def _discover_http_tools(self, server: models.MCPServer, client: httpx.AsyncClient, headers: Dict[str, str]):
+        """Discover tools from HTTP-based MCP server"""
         try:
-            logger.info(f"🔍 Discovering tools from MCP server: {server.name}")
+            logger.info(f"🔍 Discovering tools from HTTP MCP server: {server.name}")
+            
+            # Get list of available tools from the server
+            tools_url = f"{server.url}/tools"
+            response = await client.get(tools_url, headers=headers)
+            response.raise_for_status()
+            
+            tools_data = response.json()
+            tools = tools_data.get('tools', []) if isinstance(tools_data, dict) else tools_data
+            
+            server_tools = {}
+            
+            for tool in tools:
+                tool_name = tool.get('name', '')
+                tool_description = tool.get('description', '')
+                tool_parameters = tool.get('inputSchema', {}).get('properties', {})
+                
+                server_tools[tool_name] = {
+                    'name': tool_name,
+                    'description': tool_description,
+                    'parameters': list(tool_parameters.keys()),
+                    'schema': tool.get('inputSchema', {}),
+                    'server_id': str(server.id),
+                    'server_name': server.name,
+                    'category': 'MCP External'
+                }
+                
+                logger.info(f"  📋 Found tool: {tool_name}")
+            
+            # Store discovered tools
+            self.available_tools[str(server.id)] = server_tools
+            
+            # Update server metadata
+            server.tools_count = len(server_tools)
+            server.tools_discovered_at = datetime.utcnow()
+            self.db.commit()
+            
+            logger.info(f"✅ Discovered {len(server_tools)} tools from {server.name}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to discover HTTP tools from {server.name}: {e}")
+            raise
+    
+    async def _discover_fastmcp_tools(self, server: models.MCPServer, client: Client):
+        """Discover and catalog tools available from a FastMCP server"""
+        try:
+            logger.info(f"🔍 Discovering tools from FastMCP server: {server.name}")
             
             # Get list of available tools from the server
             tools = await client.list_tools()
@@ -119,21 +215,25 @@ class MCPManager:
             
             # Update server metadata
             server.tools_count = len(server_tools)
-            server.tools_discovered_at = models.datetime.utcnow()
+            server.tools_discovered_at = datetime.utcnow()
             self.db.commit()
             
             logger.info(f"✅ Discovered {len(server_tools)} tools from {server.name}")
             
         except Exception as e:
-            logger.error(f"❌ Failed to discover tools from {server.name}: {e}")
+            logger.error(f"❌ Failed to discover FastMCP tools from {server.name}: {e}")
             raise
     
     async def disconnect_from_server(self, server_id: str):
         """Disconnect from an MCP server"""
         try:
             if server_id in self.connected_clients:
-                client = self.connected_clients[server_id]
-                await client.__aexit__(None, None, None)
+                client_info = self.connected_clients[server_id]
+                
+                # Only call __aexit__ for FastMCP clients, not HTTP clients
+                if not isinstance(client_info, dict):
+                    await client_info.__aexit__(None, None, None)
+                
                 del self.connected_clients[server_id]
                 
                 if server_id in self.available_tools:
@@ -168,17 +268,26 @@ class MCPManager:
         """Get tools available from a specific MCP server"""
         return self.available_tools.get(server_id, {})
     
+    async def get_server_tools(self, server_id: str) -> Dict[str, Any]:
+        """Get tools available from a specific MCP server (async version for router compatibility)"""
+        return self.available_tools.get(str(server_id), {})
+    
     async def execute_mcp_tool(self, tool_name: str, server_id: str, **kwargs) -> Any:
         """Execute a tool on a connected MCP server"""
         try:
-            client = self.connected_clients.get(server_id)
-            if not client:
+            client_info = self.connected_clients.get(server_id)
+            if not client_info:
                 return {"error": f"Not connected to MCP server: {server_id}"}
             
             logger.info(f"🔧 Executing MCP tool: {tool_name} on server: {server_id}")
             
-            # Execute the tool
-            result = await client.call_tool(tool_name, kwargs)
+            # Check if this is an HTTP-based or FastMCP-based client
+            if isinstance(client_info, dict) and client_info.get('type') == 'http':
+                # HTTP-based MCP server (like ServiceNow)
+                result = await self._execute_http_tool(tool_name, client_info, kwargs)
+            else:
+                # FastMCP-based server
+                result = await client_info.call_tool(tool_name, kwargs)
             
             logger.info(f"✅ MCP tool {tool_name} executed successfully")
             return result
@@ -186,6 +295,31 @@ class MCPManager:
         except Exception as e:
             logger.error(f"❌ MCP tool {tool_name} execution failed: {e}")
             return {"error": f"Tool execution failed: {str(e)}"}
+    
+    async def _execute_http_tool(self, tool_name: str, client_info: Dict[str, str], arguments: Dict[str, Any]) -> Any:
+        """Execute a tool on an HTTP-based MCP server"""
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            tool_url = f"{client_info['url']}/tools/{tool_name}"
+            payload = {"arguments": arguments}
+            
+            response = await client.post(tool_url, json=payload, headers=client_info['headers'])
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # Handle ServiceNow-style error responses
+            if result.get('isError'):
+                raise Exception(f"Tool error: {result['content'][0]['text']}")
+            
+            # Parse the text content as JSON if possible
+            if 'content' in result and len(result['content']) > 0:
+                content_text = result['content'][0]['text']
+                try:
+                    return json.loads(content_text)
+                except json.JSONDecodeError:
+                    return content_text
+            
+            return result
     
     def create_fastmcp_server(self) -> FastMCP:
         """Create and configure our own FastMCP server for exposing internal tools"""
@@ -227,15 +361,24 @@ class MCPManager:
             "servers": {}
         }
         
-        for server_id, client in self.connected_clients.items():
+        for server_id, client_info in self.connected_clients.items():
             try:
-                # Check if client is connected and ping
-                if client.is_connected():
-                    await client.ping()
-                    health_status["servers"][server_id] = {"status": "healthy"}
-                    health_status["healthy_servers"] += 1
+                if isinstance(client_info, dict) and client_info.get('type') == 'http':
+                    # HTTP-based MCP server - test with health endpoint
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        health_url = f"{client_info['url']}/health"
+                        response = await client.get(health_url, headers=client_info['headers'])
+                        response.raise_for_status()
+                        health_status["servers"][server_id] = {"status": "healthy"}
+                        health_status["healthy_servers"] += 1
                 else:
-                    health_status["servers"][server_id] = {"status": "disconnected"}
+                    # FastMCP-based server
+                    if hasattr(client_info, 'is_connected') and client_info.is_connected():
+                        await client_info.ping()
+                        health_status["servers"][server_id] = {"status": "healthy"}
+                        health_status["healthy_servers"] += 1
+                    else:
+                        health_status["servers"][server_id] = {"status": "disconnected"}
             except Exception as e:
                 health_status["servers"][server_id] = {
                     "status": "unhealthy", 

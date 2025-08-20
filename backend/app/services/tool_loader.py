@@ -62,6 +62,10 @@ class ToolLoader:
         """Get tools configured for a specific agent node"""
         tools = {}
         
+        # Initialize MCP manager if not already done
+        if self._mcp_manager is None:
+            await self.initialize_mcp_manager()
+        
         try:
             # Check if agent has selectedTools in its data
             agent_data = agent_node.get('data', {})
@@ -81,11 +85,26 @@ class ToolLoader:
                     # Check MCP tools if tool not found in native registry
                     elif tool_name and self._mcp_manager:
                         mcp_tools = self._mcp_manager.get_all_mcp_tools()
+                        
+                        # First try exact match
                         if tool_name in mcp_tools:
                             tools[tool_name] = self._create_mcp_tool_wrapper(tool_name, mcp_tools[tool_name])
-                            print(f"✅ Added MCP tool: {tool_name}")
+                            print(f"✅ Added MCP tool (exact): {tool_name}")
                         else:
-                            print(f"⚠️ Tool not found in any registry: {tool_name}")
+                            # Search for tools that end with this tool name (after server prefix)
+                            found_mcp_tool = None
+                            for mcp_tool_key, mcp_tool_info in mcp_tools.items():
+                                # Check if this MCP tool matches the base name we're looking for
+                                if mcp_tool_key.endswith(f"_{tool_name}") or mcp_tool_info.get('name') == tool_name:
+                                    found_mcp_tool = (mcp_tool_key, mcp_tool_info)
+                                    break
+                            
+                            if found_mcp_tool:
+                                mcp_tool_key, mcp_tool_info = found_mcp_tool
+                                tools[tool_name] = self._create_mcp_tool_wrapper(mcp_tool_key, mcp_tool_info)
+                                print(f"✅ Added MCP tool (matched): {tool_name} -> {mcp_tool_key}")
+                            else:
+                                print(f"⚠️ Tool not found in any registry: {tool_name}")
                     else:
                         print(f"⚠️ Tool not found in registry: {tool_name}")
             
@@ -209,17 +228,27 @@ class ToolLoader:
         except Exception as e:
             print(f"⚠️ Failed to record tool usage: {e}")
     
-    def _create_mcp_tool_wrapper(self, tool_name: str, tool_info: Dict[str, Any]):
+    def _create_mcp_tool_wrapper(self, mcp_tool_key: str, tool_info: Dict[str, Any]):
         """Create a wrapper function for MCP tools to match native tool interface"""
         async def mcp_tool_wrapper(**kwargs):
             server_id = tool_info['server_id']
-            original_tool_name = tool_name.replace(f"mcp_{server_id[:8]}_", "")
+            
+            # Extract the original tool name from the MCP tool key
+            # Format: mcp_{server_id}_{original_tool_name}
+            if mcp_tool_key.startswith(f"mcp_{server_id}_"):
+                original_tool_name = mcp_tool_key.replace(f"mcp_{server_id}_", "")
+            else:
+                # Fallback: use the name from tool_info
+                original_tool_name = tool_info.get('name', mcp_tool_key)
+            
             return await self._mcp_manager.execute_mcp_tool(
                 original_tool_name, server_id, **kwargs
             )
         
-        # Add metadata to the wrapper function
-        mcp_tool_wrapper.__name__ = tool_name
+        # Add metadata to the wrapper function  
+        # Use the base tool name for the wrapper, not the full MCP key
+        base_tool_name = tool_info.get('name', mcp_tool_key.split('_')[-1])
+        mcp_tool_wrapper.__name__ = base_tool_name
         mcp_tool_wrapper.__doc__ = tool_info.get('description', 'MCP tool')
         
         return mcp_tool_wrapper
