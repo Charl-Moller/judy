@@ -1758,8 +1758,7 @@ def _check_for_unfulfilled_promises(response: str, agent_name: str) -> bool:
     # Evidence that agent actually executed tools
     execution_evidence = [
         r"(?:Found|Retrieved|Discovered)\s+\d+\s+(?:incidents?|users?|records?)",
-        r"(?:Results?|Data|Information):\s*
-",
+        r"(?:Results?|Data|Information):\s*\n",
         r"(?:INC|TASK|REQ)\d+",  # ServiceNow ticket numbers
         r"(?:Assigned to|Priority|Status|State):\s*\w+",
         r"No (?:incidents?|results?|records?) found matching"
