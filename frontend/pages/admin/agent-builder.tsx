@@ -1,8 +1,419 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneLight, oneDark } from 'react-syntax-highlighter/dist/cjs/styles/prism'
 import AgentCanvas from '../../components/canvas/AgentCanvas'
 import { FlowProvider } from '../../context/FlowContext'
+import { ExecutionProvider, useExecution } from '../../context/ExecutionContext'
+import { useFlow } from '../../context/FlowContext'
+
+// Test Chat Panel Component
+const TestChatPanel = ({ currentAgent, onClose }: { currentAgent: any; onClose: () => void }) => {
+  const {
+    conversationHistory,
+    currentInput,
+    setCurrentInput,
+    isExecuting,
+    startExecution,
+    stopExecution,
+    addMessage,
+    addLog,
+    clearHistory
+  } = useExecution()
+  
+  const { reactFlowInstance } = useFlow()
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [conversationHistory])
+
+  const handleSendMessage = async () => {
+    console.log('handleSendMessage called', {
+      currentInput: currentInput.trim(),
+      isExecuting,
+      hasReactFlowInstance: !!reactFlowInstance
+    })
+    
+    if (!currentInput.trim() || isExecuting || !reactFlowInstance) {
+      console.log('handleSendMessage aborted:', {
+        noInput: !currentInput.trim(),
+        isExecuting,
+        noReactFlow: !reactFlowInstance
+      })
+      return
+    }
+
+    const input = currentInput.trim()
+    setCurrentInput('')
+
+    // Add user message
+    addMessage({
+      type: 'user',
+      content: input
+    })
+
+    // Start execution
+    startExecution()
+    addLog({
+      level: 'info',
+      message: `🚀 Starting agent execution with input: "${input}"`
+    })
+
+    try {
+      // Get current workflow state
+      const nodes = reactFlowInstance.getNodes()
+      const edges = reactFlowInstance.getEdges()
+
+      // Validate workflow
+      if (nodes.length === 0) {
+        throw new Error('No nodes in the workflow. Add some components first!')
+      }
+
+      // Check for required components
+      const hasAgent = nodes.some(n => n.data?.nodeType === 'agent')
+      const hasLlm = nodes.some(n => n.data?.nodeType === 'llm')
+
+      if (!hasAgent && !hasLlm) {
+        throw new Error('Workflow needs at least an Agent or LLM component')
+      }
+
+      addLog({
+        level: 'info',
+        message: `📊 Workflow validation passed: ${nodes.length} nodes, ${edges.length} connections`
+      })
+
+      // Call actual API if available
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE || ''
+      if (apiBase) {
+        addLog({
+          level: 'info',
+          message: '🌐 Sending request to execution API...'
+        })
+
+        try {
+          const response = await fetch(`${apiBase}/chat/workflow`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              nodes: nodes,
+              connections: edges,
+              input: input,
+              session_id: `agent_builder_test_${Date.now()}`,
+              conversation_history: conversationHistory.map(msg => ({
+                role: msg.type === 'user' ? 'user' : 'assistant',
+                content: msg.content
+              }))
+            })
+          })
+
+          if (!response.ok) {
+            const errorData = await response.json()
+            throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`)
+          }
+
+          const result = await response.json()
+          
+          addLog({
+            level: 'info',
+            message: '✅ API execution completed successfully'
+          })
+
+          // Add assistant response
+          addMessage({
+            type: 'assistant',
+            content: result.response || 'Agent executed successfully!',
+            agentName: result.workflow_execution?.agent_name
+          })
+
+        } catch (apiError) {
+          addLog({
+            level: 'error',
+            message: `❌ API execution failed: ${apiError}`
+          })
+
+          // Add simulated response as fallback
+          addMessage({
+            type: 'assistant',
+            content: `I processed your request: "${input}". This is a simulated response since the API is not available.`
+          })
+        }
+      } else {
+        // Simulated response
+        addMessage({
+          type: 'assistant',
+          content: `I processed your request: "${input}". This is a simulated response from your agent workflow.`
+        })
+      }
+
+      addLog({
+        level: 'info',
+        message: '🎉 Agent execution completed successfully!'
+      })
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+      
+      addLog({
+        level: 'error',
+        message: `❌ Execution failed: ${errorMessage}`
+      })
+
+      addMessage({
+        type: 'error',
+        content: `Execution failed: ${errorMessage}`
+      })
+    } finally {
+      stopExecution()
+    }
+  }
+
+  const getMessageIcon = (type: string) => {
+    switch (type) {
+      case 'user':
+        return '👤'
+      case 'assistant':
+        return '🤖'
+      case 'error':
+        return '❌'
+      default:
+        return 'ℹ️'
+    }
+  }
+
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <style jsx>{`
+        .markdown-content {
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+        }
+        .markdown-content pre {
+          overflow-x: auto;
+          max-width: 100%;
+        }
+        .markdown-content *:last-child {
+          margin-bottom: 0 !important;
+        }
+      `}</style>
+      
+      {/* Header */}
+      <div className="bg-green-50 border-b border-green-200 px-4 py-3 flex items-center justify-between">
+        <h3 className="font-semibold text-green-800">🧪 Test Lab</h3>
+        <button
+          onClick={onClose}
+          className="text-green-600 hover:text-green-800"
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Execution Progress */}
+      {isExecuting && (
+        <div className="px-4 py-2 bg-blue-50 border-b border-blue-200">
+          <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            <span className="text-sm text-blue-700">Agent is processing...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Chat Messages */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-6">
+        {conversationHistory.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="text-gray-400 text-4xl mb-2">🧪</div>
+            <p className="text-gray-600 text-sm">
+              Start testing your agent by typing a message below
+            </p>
+          </div>
+        ) : (
+          conversationHistory.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${
+                message.type === 'user' ? 'justify-end' : 'justify-start'
+              }`}
+            >
+              <div
+                className={`max-w-[85%] rounded-lg overflow-hidden shadow-sm ${
+                  message.type === 'user'
+                    ? 'bg-green-600 text-white'
+                    : message.type === 'error'
+                    ? 'bg-red-50 text-red-800 border border-red-200'
+                    : 'bg-white text-gray-800 border border-gray-200'
+                }`}
+              >
+                <div className={`flex items-center space-x-2 px-4 py-2 border-b ${
+                  message.type === 'user' 
+                    ? 'border-white/20 bg-green-700/20' 
+                    : 'border-gray-100 bg-gray-50/50'
+                }`}>
+                  <span className="text-sm">{getMessageIcon(message.type)}</span>
+                  {message.agentName && (
+                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${
+                      message.type === 'user' 
+                        ? 'bg-white/20 text-white' 
+                        : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {message.agentName}
+                    </span>
+                  )}
+                  <span className="text-xs opacity-60 ml-auto">
+                    {formatTime(message.timestamp)}
+                  </span>
+                </div>
+                <div className="px-4 py-3">
+                  <div className={`markdown-content ${
+                    message.type === 'user' ? 'text-white' : 'text-gray-800'
+                  }`}>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                      code({ node, inline, className, children, ...props }) {
+                        const match = /language-(\w+)/.exec(className || '')
+                        return !inline && match ? (
+                          <SyntaxHighlighter
+                            style={message.type === 'user' ? oneDark : oneLight}
+                            language={match[1]}
+                            PreTag="div"
+                            className="rounded-md my-2"
+                            {...props}
+                          >
+                            {String(children).replace(/\n$/, '')}
+                          </SyntaxHighlighter>
+                        ) : (
+                          <code 
+                            className={`px-1 py-0.5 rounded text-sm font-mono ${
+                              message.type === 'user' 
+                                ? 'bg-white/20 text-green-100' 
+                                : 'bg-gray-100 text-gray-800'
+                            }`} 
+                            {...props}
+                          >
+                            {children}
+                          </code>
+                        )
+                      },
+                      h1: ({ children }) => <h1 className="text-xl font-bold mb-2">{children}</h1>,
+                      h2: ({ children }) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
+                      h3: ({ children }) => <h3 className="text-md font-bold mb-1">{children}</h3>,
+                      p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
+                      ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+                      li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                      blockquote: ({ children }) => (
+                        <blockquote className={`border-l-4 pl-3 py-2 my-2 italic ${
+                          message.type === 'user' 
+                            ? 'border-white/40 bg-white/10' 
+                            : 'border-gray-300 bg-gray-50'
+                        }`}>
+                          {children}
+                        </blockquote>
+                      ),
+                      strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                      em: ({ children }) => <em className="italic">{children}</em>,
+                      a: ({ href, children }) => (
+                        <a 
+                          href={href} 
+                          className={`underline hover:no-underline ${
+                            message.type === 'user' ? 'text-green-200' : 'text-blue-600'
+                          }`}
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                        >
+                          {children}
+                        </a>
+                      ),
+                      table: ({ children }) => (
+                        <div className="overflow-x-auto my-2">
+                          <table className="min-w-full border border-gray-300">{children}</table>
+                        </div>
+                      ),
+                      th: ({ children }) => (
+                        <th className={`border border-gray-300 px-3 py-2 font-bold text-left ${
+                          message.type === 'user' ? 'bg-white/20' : 'bg-gray-100'
+                        }`}>
+                          {children}
+                        </th>
+                      ),
+                      td: ({ children }) => (
+                        <td className="border border-gray-300 px-3 py-2">{children}</td>
+                      ),
+                      }}
+                    >
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input Area */}
+      <div className="border-t border-gray-200 p-4">
+        <div className="flex gap-2 mb-2">
+          <button
+            onClick={clearHistory}
+            disabled={isExecuting}
+            className="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50"
+          >
+            🗑️ Clear
+          </button>
+          <div className="text-xs text-gray-500 px-2 py-1">
+            Testing: {currentAgent?.name || 'Current Agent'}
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="Type your test message..."
+            value={currentInput}
+            onChange={(e) => setCurrentInput(e.target.value)}
+            onKeyDown={(e) => {
+              console.log('Key pressed:', e.key)
+              if (e.key === 'Enter' && !e.shiftKey) {
+                console.log('Enter key pressed, calling handleSendMessage')
+                e.preventDefault()
+                handleSendMessage()
+              }
+            }}
+            disabled={isExecuting}
+            className="flex-1 px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 focus:border-transparent text-sm disabled:opacity-50"
+          />
+          <button
+            onClick={() => {
+              console.log('Send button clicked')
+              handleSendMessage()
+            }}
+            disabled={isExecuting || !currentInput.trim()}
+            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm"
+          >
+            {isExecuting ? '⏳' : '📤'}
+          </button>
+        </div>
+        <div className="text-xs text-gray-500 mt-1">
+          Press Enter to send • Shift+Enter for new line
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // Example agents defined outside component to avoid recreation
 const EXAMPLE_AGENTS = [
@@ -209,6 +620,7 @@ export default function AgentBuilderPage() {
   const [editingAgentName, setEditingAgentName] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [filterTag, setFilterTag] = useState<string>('')
+  const [showTestChat, setShowTestChat] = useState(false)
 
   const loadAgents = useCallback(async () => {
     try {
@@ -406,20 +818,48 @@ export default function AgentBuilderPage() {
 
   if (showEditor) {
     return (
-      <div className="h-screen flex flex-col">
-        {/* Visual Canvas Editor */}
-        <div className="flex-1">
-          <FlowProvider>
-            <AgentCanvas
-              initialAgent={currentAgent}
-              onSave={handleSaveAgent}
-              onExecute={handleExecuteAgent}
-              onBack={() => setShowEditor(false)}
-              height="100%"
-            />
-          </FlowProvider>
-        </div>
-      </div>
+      <FlowProvider>
+        <ExecutionProvider>
+          <div className="h-screen flex">
+            {/* Canvas Section */}
+            <div className={`${
+              showTestChat ? 'w-2/3' : 'w-full' // Test chat + canvas OR canvas only
+            } flex flex-col transition-all duration-300`}>
+              <AgentCanvas
+                initialAgent={currentAgent}
+                onSave={handleSaveAgent}
+                onExecute={handleExecuteAgent}
+                onBack={() => {
+                  setShowEditor(false)
+                  setShowTestChat(false)
+                }}
+                onNodeSelect={(node) => {
+                  console.log('Node selected in Agent Builder:', node)
+                  // AgentCanvas handles node selection internally with its own NodeConfigPanel
+                }}
+                onOpenTestChat={() => {
+                  console.log('Opening test chat in Agent Builder')
+                  setShowTestChat(true)
+                }}
+                height="100%"
+              />
+            </div>
+            
+            {/* Test Chat Panel */}
+            {showTestChat && (
+              <div className="w-1/3 border-l border-gray-200 transition-all duration-300">
+                <TestChatPanel 
+                  currentAgent={currentAgent}
+                  onClose={() => setShowTestChat(false)}
+                />
+              </div>
+            )}
+
+            
+            {/* NodeConfigPanel is handled internally by AgentCanvas */}
+          </div>
+        </ExecutionProvider>
+      </FlowProvider>
     )
   }
 

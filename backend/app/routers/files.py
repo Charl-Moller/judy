@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 import os
 import uuid
@@ -12,6 +13,12 @@ from ..db import models
 from ..config import settings
 
 router = APIRouter(prefix="/files", tags=["Files"])
+
+# Define the public downloads directory for generated files
+DOWNLOADS_DIR = Path(__file__).parent.parent.parent / "public" / "downloads"
+
+# Ensure downloads directory exists
+DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 @router.post("")
 async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -80,3 +87,58 @@ async def get_file(id: str, db: Session = Depends(get_db)):
     if not f:
         raise HTTPException(status_code=404, detail="File not found")
     return {"file_id": str(f.id), "filename": f.filename, "content_type": f.content_type, "size": f.size, "url": f.url, "uploaded_at": f.uploaded_at}
+
+@router.get("/download/{filename}")
+async def download_file(filename: str):
+    """
+    Download a generated file from the public downloads directory
+    """
+    # Security: Only allow safe filename characters
+    if not all(c.isalnum() or c in '.-_' for c in filename):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    file_path = DOWNLOADS_DIR / filename
+    
+    # Check if file exists
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Check if it's actually a file (not a directory)
+    if not file_path.is_file():
+        raise HTTPException(status_code=400, detail="Invalid file")
+    
+    # Determine media type based on file extension
+    media_type = "application/octet-stream"
+    if filename.endswith('.xlsx'):
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif filename.endswith('.csv'):
+        media_type = "text/csv"
+    elif filename.endswith('.pdf'):
+        media_type = "application/pdf"
+    
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type=media_type
+    )
+
+@router.get("/list/downloads")
+async def list_download_files():
+    """
+    List available generated files in the downloads directory
+    """
+    try:
+        files = []
+        if DOWNLOADS_DIR.exists():
+            for file_path in DOWNLOADS_DIR.iterdir():
+                if file_path.is_file():
+                    stat = file_path.stat()
+                    files.append({
+                        "filename": file_path.name,
+                        "size": stat.st_size,
+                        "created": stat.st_ctime,
+                        "download_url": f"/files/download/{file_path.name}"
+                    })
+        return {"files": files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing files: {str(e)}")

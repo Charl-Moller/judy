@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import MermaidDiagram from '../components/MermaidDiagram'
+import AgentCanvas from '../components/canvas/AgentCanvas'
+import { FlowProvider } from '../context/FlowContext'
+import { NodeConfigProvider } from '../context/NodeConfigContext'
+import { ExecutionProvider } from '../context/ExecutionContext'
 
 type Attachment = { type: string; url?: string; content?: string }
 
@@ -75,6 +79,130 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([])
   const [chat, setChat] = useState<{ role: 'user'|'assistant', content: string, attachments?: Attachment[] }[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showCanvas, setShowCanvas] = useState(false)
+  const [currentWorkflow, setCurrentWorkflow] = useState(null)
+  const [selectedComponent, setSelectedComponent] = useState(null)
+  const [showTestChat, setShowTestChat] = useState(false)
+  const [testMessages, setTestMessages] = useState<{role: 'user'|'system'|'assistant', content: string, timestamp: Date}[]>([
+    {role: 'system', content: 'Test Lab initialized. Ready to test your workflow!', timestamp: new Date()}
+  ])
+  
+  // Predefined workflow templates
+  const workflowTemplates = {
+    simple: {
+      name: "Simple Chat Agent",
+      description: "Basic AI chat agent",
+      nodes: [
+        {
+          id: "trigger_1",
+          type: "trigger",
+          position: { x: 100, y: 100 },
+          data: {
+            name: "Chat Trigger",
+            type: "webhook",
+            method: "POST",
+            path: "/chat"
+          }
+        },
+        {
+          id: "agent_1",
+          type: "agent",
+          position: { x: 300, y: 100 },
+          data: {
+            name: "Chat Assistant",
+            systemPrompt: "You are a helpful AI assistant. Be friendly and concise."
+          }
+        },
+        {
+          id: "llm_1",
+          type: "llm",
+          position: { x: 500, y: 100 },
+          data: {
+            name: "GPT-4",
+            provider: "OpenAI",
+            model: "gpt-4",
+            temperature: 0.7
+          }
+        }
+      ],
+      connections: [
+        {
+          id: "conn_1",
+          source: "trigger_1",
+          target: "agent_1",
+          type: "data"
+        },
+        {
+          id: "conn_2",
+          source: "agent_1",
+          target: "llm_1",
+          type: "data"
+        }
+      ]
+    },
+    multiAgent: {
+      name: "Multi-Agent System",
+      description: "Orchestrator with specialized agents",
+      nodes: [
+        {
+          id: "orchestrator_1",
+          type: "orchestrator",
+          position: { x: 200, y: 50 },
+          data: {
+            name: "Main Orchestrator",
+            description: "Routes requests to appropriate agents"
+          }
+        },
+        {
+          id: "persona_router_1",
+          type: "persona_router",
+          position: { x: 50, y: 200 },
+          data: {
+            name: "Persona Router",
+            description: "Determines best agent for request"
+          }
+        },
+        {
+          id: "agent_1",
+          type: "agent",
+          position: { x: 200, y: 300 },
+          data: {
+            name: "General Agent",
+            systemPrompt: "You are a general-purpose AI assistant."
+          }
+        },
+        {
+          id: "agent_2",
+          type: "agent",
+          position: { x: 400, y: 300 },
+          data: {
+            name: "Data Analyst",
+            systemPrompt: "You are a specialized data analysis agent."
+          }
+        }
+      ],
+      connections: [
+        {
+          id: "conn_1",
+          source: "orchestrator_1",
+          target: "persona_router_1",
+          type: "control"
+        },
+        {
+          id: "conn_2",
+          source: "persona_router_1",
+          target: "agent_1",
+          type: "data"
+        },
+        {
+          id: "conn_3",
+          source: "persona_router_1",
+          target: "agent_2",
+          type: "data"
+        }
+      ]
+    }
+  }
 
   const apiBase = process.env.NEXT_PUBLIC_API_BASE || '' // e.g. '' or '/api'
 
@@ -258,9 +386,38 @@ export default function Home() {
       </header>
 
       <main className="flex-1">
-        <div className="max-w-5xl mx-auto px-4 py-6 grid md:grid-cols-3 gap-6">
-          <section className="md:col-span-2 card p-4 flex flex-col h-[70vh]">
-            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+        <div className="max-w-7xl mx-auto px-4 py-6 flex gap-6 h-[calc(100vh-140px)]">
+          {/* Chat Section */}
+          <section className={`${
+            showTestChat && showCanvas && selectedComponent ? 'w-1/4' : // Four panes: chat + test + canvas + config
+            showTestChat && showCanvas ? 'w-1/3' :                      // Three panes: chat + test + canvas  
+            showTestChat && selectedComponent ? 'w-1/2' :               // Three panes: chat + test + config
+            showCanvas && selectedComponent ? 'w-1/3' :                 // Three panes: chat + canvas + config
+            showTestChat ? 'w-1/2' :                                    // Two panes: chat + test
+            showCanvas ? 'w-1/2' :                                      // Two panes: chat + canvas
+            selectedComponent ? 'w-2/3' :                               // Two panes: chat + config
+            'w-3/4'                                                     // Default: chat + sidebar
+          } card p-4 flex flex-col overflow-hidden transition-all duration-300`}>
+            {/* Layout Status Indicator */}
+            <div className="mb-3 pb-2 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold text-gray-800">Chat</h2>
+                <div className="flex items-center space-x-2 text-xs bg-gray-100 px-2 py-1 rounded">
+                  <span className="text-gray-600">Layout:</span>
+                  <span className="font-medium text-blue-600">
+                    {showTestChat && showCanvas && selectedComponent ? 'Chat + Test + Canvas + Config' :
+                     showTestChat && showCanvas ? 'Chat + Test + Canvas' :
+                     showTestChat && selectedComponent ? 'Chat + Test + Config' :
+                     showCanvas && selectedComponent ? 'Chat + Canvas + Config' :
+                     showTestChat ? 'Chat + Test' :
+                     showCanvas ? 'Chat + Canvas' :
+                     selectedComponent ? 'Chat + Config' :
+                     'Chat + Sidebar'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
               {chat.map((c, idx) => (
                 <div key={idx} className="">
                   <div className="text-xs text-gray-500 mb-1">
@@ -289,7 +446,7 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <div className="mt-4 space-y-3">
+            <div className="flex-shrink-0 mt-4 space-y-3 border-t pt-3">
               
               {/* Message Input */}
               <div className="flex items-center gap-2">
@@ -309,23 +466,437 @@ export default function Home() {
             </div>
           </section>
 
-          <aside className="card p-4 space-y-3">
-            <h2 className="font-semibold">Tips</h2>
-            <ul className="text-sm list-disc pl-5 text-gray-600 space-y-1">
-              <li>Upload spreadsheets to analyze and generate charts</li>
-              <li>Ask questions that leverage your knowledge base</li>
-              <li>Try: &ldquo;Summarize latest results and create a chart&rdquo;</li>
-            </ul>
-            
-            {/* Current Agent Info */}
-            <div className="pt-3 border-t border-gray-200">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Current Agent</h3>
-              <div className="text-sm text-gray-600">
-                <div className="font-medium">Orchestrator</div>
-                <div className="text-xs text-gray-500">Handles routing and coordination of agents.</div>
+          {/* Test Chat Section */}
+          {showTestChat && (
+            <section className={`${
+              showCanvas && selectedComponent ? 'w-1/4' : // Four panes
+              showCanvas ? 'w-1/3' :                      // Three panes  
+              selectedComponent ? 'w-1/2' :               // Three panes
+              'w-1/2'                                     // Two panes
+            } card p-4 flex flex-col overflow-hidden transition-all duration-300`}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold text-green-700">🧪 Test Lab</h2>
+                <button
+                  onClick={() => setShowTestChat(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ×
+                </button>
               </div>
-            </div>
-          </aside>
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1 border border-green-200 rounded p-3 bg-green-50">
+                <div className="text-center py-4 text-green-600">
+                  <div className="text-4xl mb-2">🚀</div>
+                  <p className="text-sm">Test your workflow here!</p>
+                  <p className="text-xs mt-1">Changes to components update in real-time</p>
+                </div>
+                
+                {/* Test messages */}
+                <div className="space-y-2 min-h-32">
+                  {testMessages.map((msg, idx) => (
+                    <div key={idx} className={`p-2 rounded border text-sm ${
+                      msg.role === 'system' ? 'bg-green-50 border-green-200' :
+                      msg.role === 'user' ? 'bg-blue-50 border-blue-200 ml-8' :
+                      'bg-gray-50 border-gray-200'
+                    }`}>
+                      <span className={`font-medium ${
+                        msg.role === 'system' ? 'text-green-600' :
+                        msg.role === 'user' ? 'text-blue-600' :
+                        'text-gray-600'
+                      }`}>
+                        {msg.role === 'system' ? 'System:' : 
+                         msg.role === 'user' ? 'You:' : 'Assistant:'}
+                      </span>
+                      <span className="ml-1">{msg.content}</span>
+                      <div className="text-xs opacity-60 mt-1">
+                        {msg.timestamp.toLocaleTimeString()}
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {/* Show active component being edited */}
+                  {selectedComponent && (
+                    <div className="bg-blue-50 p-2 rounded border border-blue-200 text-sm">
+                      <span className="text-blue-600 font-medium">Config:</span> 
+                      <span className="ml-1">
+                        Editing {selectedComponent.type} "{selectedComponent.data?.name || selectedComponent.id}"
+                      </span>
+                      <div className="text-xs text-blue-500 mt-1">
+                        ⚡ Changes will be applied to next test run
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Show current workflow status */}
+                  {currentWorkflow && (
+                    <div className="bg-purple-50 p-2 rounded border border-purple-200 text-sm">
+                      <span className="text-purple-600 font-medium">Workflow:</span> 
+                      <span className="ml-1">
+                        {currentWorkflow.name || 'Custom Workflow'} ({currentWorkflow.nodes?.length || 0} components)
+                      </span>
+                    </div>
+                  )}
+                  
+                  {!currentWorkflow && (
+                    <div className="bg-yellow-50 p-2 rounded border border-yellow-200 text-sm">
+                      <span className="text-yellow-600 font-medium">Notice:</span> 
+                      <span className="ml-1">Load a workflow template to enable testing</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              <div className="mt-3">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Type test message..."
+                    className="flex-1 px-3 py-2 border border-green-300 rounded focus:ring-2 focus:ring-green-500 text-sm"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const input = e.currentTarget.value.trim()
+                        if (input) {
+                          e.currentTarget.value = ''
+                          
+                          // Add user message
+                          setTestMessages(prev => [...prev, {
+                            role: 'user',
+                            content: input,
+                            timestamp: new Date()
+                          }])
+                          
+                          // Simulate processing and response
+                          setTimeout(() => {
+                            const response = currentWorkflow ? 
+                              `Processed "${input}" through ${currentWorkflow.name || 'workflow'} with ${currentWorkflow.nodes?.length || 0} components.` :
+                              'Please load a workflow template first to enable testing.'
+                            
+                            setTestMessages(prev => [...prev, {
+                              role: 'assistant',
+                              content: response,
+                              timestamp: new Date()
+                            }])
+                          }, 1000)
+                        }
+                      }
+                    }}
+                  />
+                  <button className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm">
+                    Test
+                  </button>
+                </div>
+                <div className="mt-2 text-xs text-green-600">
+                  Press Enter to send • Component changes apply instantly
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Canvas Section */}
+          {showCanvas && (
+            <section className={`${
+              showTestChat && selectedComponent ? 'w-1/4' : // Four panes
+              showTestChat ? 'w-1/3' :                      // Three panes
+              selectedComponent ? 'w-1/3' :                 // Three panes  
+              'w-1/2'                                       // Two panes
+            } card p-4 flex flex-col transition-all duration-300`}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold">Workflow Canvas</h2>
+                <div className="flex items-center space-x-2">
+                  {currentWorkflow && (
+                    <button
+                      onClick={() => {
+                        if (confirm('Clear current workflow?')) {
+                          setCurrentWorkflow(null)
+                          setSelectedComponent(null)
+                        }
+                      }}
+                      className="text-gray-500 hover:text-gray-700 text-sm"
+                      title="Clear workflow"
+                    >
+                      🗑️
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowCanvas(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0">
+                <FlowProvider>
+                  <NodeConfigProvider>
+                    <ExecutionProvider>
+                      <div className="h-full border border-gray-200 rounded">
+                        {currentWorkflow ? (
+                          <AgentCanvas
+                            height="100%"
+                            initialAgent={currentWorkflow}
+                            onSave={(workflow) => {
+                              setCurrentWorkflow(workflow)
+                              console.log('Workflow saved:', workflow)
+                              alert('Workflow saved to session!')
+                              // You could save to backend here
+                            }}
+                            onExecute={(workflow) => {
+                              console.log('Executing workflow:', workflow)
+                              alert('Workflow execution would start here!')
+                              // Execute the workflow
+                            }}
+                            onNodeSelect={(node) => {
+                              console.log('Node selected:', node)
+                              setSelectedComponent(node)
+                            }}
+                            onOpenTestChat={() => {
+                              console.log('Opening test chat from canvas')
+                              setShowTestChat(true)
+                            }}
+                          />
+                        ) : (
+                          <div className="h-full flex items-center justify-center bg-gray-50">
+                            <div className="text-center">
+                              <div className="text-gray-400 text-6xl mb-4">🎨</div>
+                              <h3 className="text-lg font-medium text-gray-900 mb-2">Ready to Design</h3>
+                              <p className="text-gray-600 mb-4">
+                                Use the Quick Start templates or drag components to create your workflow
+                              </p>
+                              <div className="space-y-2">
+                                <button
+                                  onClick={() => {
+                                    setCurrentWorkflow(workflowTemplates.simple)
+                                  }}
+                                  className="block mx-auto btn btn-secondary btn-sm"
+                                >
+                                  🤖 Load Simple Agent
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setCurrentWorkflow(workflowTemplates.multiAgent)
+                                  }}
+                                  className="block mx-auto btn btn-secondary btn-sm"
+                                >
+                                  🎛️ Load Multi-Agent System
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </ExecutionProvider>
+                  </NodeConfigProvider>
+                </FlowProvider>
+              </div>
+            </section>
+          )}
+
+          {/* Component Config Panel - Always show when selectedComponent exists */}
+          {selectedComponent && (
+            <section className={`${
+              showTestChat && showCanvas ? 'w-1/4' :  // Four panes
+              showTestChat ? 'w-1/2' :                // Three panes
+              showCanvas ? 'w-1/3' :                  // Three panes
+              'w-1/4'                                 // Two panes
+            } card p-4 space-y-3 transition-all duration-300`}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold">Component Config</h2>
+                <button
+                  onClick={() => setSelectedComponent(null)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Component Type
+                  </label>
+                  <div className="text-sm text-gray-600 p-2 bg-gray-50 rounded">
+                    {selectedComponent.type}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={selectedComponent.data?.name || ''}
+                    onChange={(e) => {
+                      setSelectedComponent({
+                        ...selectedComponent,
+                        data: { ...selectedComponent.data, name: e.target.value }
+                      })
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                {selectedComponent.type === 'agent' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      System Prompt
+                    </label>
+                    <textarea
+                      value={selectedComponent.data?.systemPrompt || ''}
+                      onChange={(e) => {
+                        setSelectedComponent({
+                          ...selectedComponent,
+                          data: { ...selectedComponent.data, systemPrompt: e.target.value }
+                        })
+                      }}
+                      rows={4}
+                      className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                      placeholder="Enter system prompt for this agent..."
+                    />
+                  </div>
+                )}
+                {selectedComponent.type === 'llm' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Model
+                      </label>
+                      <select
+                        value={selectedComponent.data?.model || 'gpt-4'}
+                        onChange={(e) => {
+                          setSelectedComponent({
+                            ...selectedComponent,
+                            data: { ...selectedComponent.data, model: e.target.value }
+                          })
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="gpt-4">GPT-4</option>
+                        <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Temperature ({selectedComponent.data?.temperature || 0.7})
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="2"
+                        step="0.1"
+                        value={selectedComponent.data?.temperature || 0.7}
+                        onChange={(e) => {
+                          setSelectedComponent({
+                            ...selectedComponent,
+                            data: { ...selectedComponent.data, temperature: parseFloat(e.target.value) }
+                          })
+                        }}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                )}
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <button
+                    onClick={() => {
+                      // Apply changes and close panel
+                      console.log('Applying changes:', selectedComponent)
+                      setSelectedComponent(null)
+                    }}
+                    className="w-full btn btn-primary btn-sm"
+                  >
+                    Apply Changes
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Sidebar - Show when neither canvas nor config panel nor test chat is active */}
+          {!showCanvas && !selectedComponent && !showTestChat && (
+            <aside className="w-1/4 card p-4 space-y-3">
+              <h2 className="font-semibold">Controls</h2>
+              
+              {/* Canvas Toggle */}
+              <button
+                onClick={() => setShowCanvas(true)}
+                className="w-full btn btn-primary mb-2"
+              >
+                🎨 Open Canvas
+              </button>
+              
+              {/* Test Lab Toggle */}
+              <button
+                onClick={() => setShowTestChat(true)}
+                className="w-full bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 transition-colors mb-4"
+              >
+                🧪 Open Test Lab
+              </button>
+              
+              {/* Quick Templates */}
+              <div className="mb-4">
+                <h3 className="font-semibold text-sm mb-2">Quick Start</h3>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => {
+                      setCurrentWorkflow(workflowTemplates.simple)
+                      setShowCanvas(true)
+                    }}
+                    className="w-full btn btn-secondary btn-sm text-left"
+                  >
+                    🤖 Simple Chat Agent
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCurrentWorkflow(workflowTemplates.multiAgent)
+                      setShowCanvas(true)
+                    }}
+                    className="w-full btn btn-secondary btn-sm text-left"
+                  >
+                    🎛️ Multi-Agent System
+                  </button>
+                </div>
+              </div>
+              
+              {/* Test Layout Button */}
+              <div className="mb-4">
+                <h3 className="font-semibold text-sm mb-2">Test Layout</h3>
+                <button
+                  onClick={() => {
+                    // Simulate component selection during chat
+                    setSelectedComponent({
+                      id: 'demo_agent',
+                      type: 'agent',
+                      data: {
+                        name: 'Demo Agent',
+                        systemPrompt: 'You are a demonstration agent for testing the layout.'
+                      }
+                    })
+                  }}
+                  className="w-full btn btn-secondary btn-sm"
+                >
+                  📝 Select Component (Demo)
+                </button>
+              </div>
+              
+              <h3 className="font-semibold text-sm">Tips</h3>
+              <ul className="text-sm list-disc pl-5 text-gray-600 space-y-1">
+                <li>Upload spreadsheets to analyze and generate charts</li>
+                <li>Ask questions that leverage your knowledge base</li>
+                <li>Try: &ldquo;Summarize latest results and create a chart&rdquo;</li>
+                <li>Use the canvas to design custom workflows</li>
+                <li>Open Test Lab + Canvas + select a component for full development experience</li>
+                <li>Component changes apply to test runs in real-time</li>
+                <li>Chat and all panels work together seamlessly</li>
+              </ul>
+              
+              {/* Current Agent Info */}
+              <div className="pt-3 border-t border-gray-200">
+                <h3 className="text-sm font-medium text-gray-700 mb-2">Current Agent</h3>
+                <div className="text-sm text-gray-600">
+                  <div className="font-medium">Orchestrator</div>
+                  <div className="text-xs text-gray-500">Handles routing and coordination of agents.</div>
+                </div>
+              </div>
+            </aside>
+          )}
         </div>
       </main>
 

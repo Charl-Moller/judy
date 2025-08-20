@@ -31,6 +31,7 @@ class Agent(Base):
     name = Column(String, nullable=False)
     description = Column(Text)
     system_prompt = Column(Text)  # Custom system prompt for the agent
+    routing_summary = Column(Text)  # Content-policy-safe summary for persona router
     status = Column(Enum(AgentStatus), default=AgentStatus.active)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -138,13 +138,22 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
                 print(f"Persona router orchestration failed: {e}")
                 raise HTTPException(status_code=400, detail=f"Persona router orchestration failed: {str(e)}")
         
-        # Find connected LLM node (search from primary_node)
+        # Find connected LLM node 
         llm_node = None
-        search_node_id = primary_node.get("id")
+        if persona_router_node:
+            # For persona router: find LLM connected to the selected agent, not the router
+            selected_agent_node = routing_result["agent"]
+            search_node_id = selected_agent_node.get("id")
+            print(f"🔧 WORKFLOW: Looking for LLM connected to selected agent: {selected_agent_node.get('data', {}).get('name')} (ID: {search_node_id})")
+        else:
+            # For direct agent: find LLM connected to the agent
+            search_node_id = primary_node.get("id")
+            print(f"🔧 WORKFLOW: Looking for LLM connected to agent: {primary_node.get('data', {}).get('name')} (ID: {search_node_id})")
         for connection in connections:
             if (connection.get("source") == search_node_id and 
                 any(n.get("id") == connection.get("target") and n.get("type") == "llm" for n in nodes)):
                 llm_node = next(n for n in nodes if n.get("id") == connection.get("target"))
+                print(f"✅ WORKFLOW: Found LLM node: {llm_node.get('data', {}).get('name')} connected to agent")
                 break
         
         if not llm_node:
@@ -414,13 +423,22 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Persona router orchestration failed: {str(e)}")
         
-        # Find connected LLM node (search from primary_node)
+        # Find connected LLM node 
         llm_node = None
-        search_node_id = primary_node.get("id")
+        if persona_router_node:
+            # For persona router: find LLM connected to the selected agent, not the router
+            selected_agent_node = routing_result["agent"]
+            search_node_id = selected_agent_node.get("id")
+            print(f"🔧 WORKFLOW: Looking for LLM connected to selected agent: {selected_agent_node.get('data', {}).get('name')} (ID: {search_node_id})")
+        else:
+            # For direct agent: find LLM connected to the agent
+            search_node_id = primary_node.get("id")
+            print(f"🔧 WORKFLOW: Looking for LLM connected to agent: {primary_node.get('data', {}).get('name')} (ID: {search_node_id})")
         for connection in connections:
             if (connection.get("source") == search_node_id and 
                 any(n.get("id") == connection.get("target") and n.get("type") == "llm" for n in nodes)):
                 llm_node = next(n for n in nodes if n.get("id") == connection.get("target"))
+                print(f"✅ WORKFLOW: Found LLM node: {llm_node.get('data', {}).get('name')} connected to agent")
                 break
         
         if not llm_node:

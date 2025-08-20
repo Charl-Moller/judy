@@ -53,10 +53,12 @@ interface AgentCanvasProps {
   onSave?: (agent: any) => void
   onExecute?: (agent: any) => void
   onBack?: () => void
+  onNodeSelect?: (node: any) => void
+  onOpenTestChat?: () => void
   initialAgent?: any
 }
 
-const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, initialAgent }) => {
+const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, onNodeSelect, onOpenTestChat, initialAgent }) => {
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const { setReactFlowInstance, reactFlowInstance } = useFlow()
   const { isConfigOpen } = useNodeConfig()
@@ -115,6 +117,20 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, in
     },
     [setEdges]
   )
+
+  // Handle node click for automatic config panel opening
+  const onNodeClick = useCallback((event: any, node: Node) => {
+    console.log('Node clicked:', node)
+    if (onNodeSelect) {
+      // Convert ReactFlow node back to our component format
+      const componentData = {
+        id: node.id,
+        type: node.data?.nodeType || node.type || 'unknown',
+        data: node.data
+      }
+      onNodeSelect(componentData)
+    }
+  }, [onNodeSelect])
 
   const onInit = (instance: ReactFlowInstance) => {
     setReactFlowInstance(instance)
@@ -340,6 +356,7 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, in
         onSave={handleSave}
         onExecute={handleExecute}
         onBack={onBack}
+        onOpenTestChat={onOpenTestChat}
       />
       <Box sx={{ 
         display: 'flex', 
@@ -362,6 +379,7 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, in
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onNodeClick={onNodeClick}
             onInit={onInit}
             onMove={onMove}
             onDrop={onDrop}
@@ -436,7 +454,6 @@ const Flow: React.FC<AgentCanvasProps> = (props) => {
     <ExecutionProvider>
       <NodeConfigProvider>
         <FlowContent {...props} />
-        <TestPanel />
       </NodeConfigProvider>
     </ExecutionProvider>
   )

@@ -272,11 +272,11 @@ none:0.0"""
         print(f"\n🧠 PERSONA ROUTER: System prompt-based routing")
         print(f"💬 User Input: {user_input[:100]}{'...' if len(user_input) > 100 else ''}")
         print(f"🤖 Available Agents: {len(connected_agents)}")
-        # Build agent descriptions from system prompts AND configured tools
+        # Build agent descriptions from routing summaries AND configured tools
         agent_descriptions = []
         for i, agent in enumerate(connected_agents):
             name = agent['data'].get('name', 'Unnamed Agent')
-            system_prompt = agent['data'].get('systemPrompt', '')
+            agent_db_id = agent['data'].get('databaseId')  # Get the database ID for routing summary lookup
             
             # Get configured tools by finding tool nodes connected to this agent
             configured_tools = self._get_agent_connected_tools(
@@ -300,43 +300,102 @@ none:0.0"""
             
             tools_text = f"Tools: {'; '.join(tool_descriptions)}" if tool_descriptions else "Tools: None"
             
-            print(f"🔍 [{i+1}] Agent: '{name}' - System Prompt: {len(system_prompt)} chars, {tools_text}")
+            # Try to get routing summary from database using multiple possible ID fields
+            routing_summary = None
+            agent_db_id = agent_db_id or agent['data'].get('savedConfigId') or agent['data'].get('id')
             
-            # Build description including both system prompt and tools
-            if system_prompt:
-                # Use more of the system prompt for better context, but keep reasonable
-                prompt_excerpt = system_prompt[:300] + ("..." if len(system_prompt) > 300 else "")
-                description = f"- {name} (ID: {agent['id']}): {prompt_excerpt}\n  {tools_text}"
+            if agent_db_id:
+                try:
+                    from ..db.database import SessionLocal
+                    from ..db import models
+                    db = SessionLocal()
+                    try:
+                        # Try to find agent by ID (UUID format)
+                        agent_record = db.query(models.Agent).filter(models.Agent.id == agent_db_id).first()
+                        if agent_record and agent_record.routing_summary:
+                            routing_summary = agent_record.routing_summary
+                            print(f"✅ [{i+1}] Agent: '{name}' - Using routing summary ({len(routing_summary)} chars)")
+                        elif agent_record:
+                            print(f"⚠️ [{i+1}] Agent: '{name}' - Found agent in DB but no routing summary available")
+                        else:
+                            # Try to find agent by name as fallback
+                            agent_record = db.query(models.Agent).filter(models.Agent.name == name).first()
+                            if agent_record and agent_record.routing_summary:
+                                routing_summary = agent_record.routing_summary
+                                print(f"✅ [{i+1}] Agent: '{name}' - Using routing summary from name match ({len(routing_summary)} chars)")
+                            elif agent_record:
+                                print(f"⚠️ [{i+1}] Agent: '{name}' - Found agent by name but no routing summary available")
+                            else:
+                                print(f"⚠️ [{i+1}] Agent: '{name}' - No agent found in database (ID: {agent_db_id})")
+                    finally:
+                        db.close()
+                except Exception as e:
+                    print(f"❌ [{i+1}] Agent: '{name}' - Failed to fetch routing summary: {e}")
             else:
-                description = f"- {name} (ID: {agent['id']}): General purpose agent\n  {tools_text}"
+                print(f"⚠️ [{i+1}] Agent: '{name}' - No database ID available, trying name lookup")
+                try:
+                    from ..db.database import SessionLocal
+                    from ..db import models
+                    db = SessionLocal()
+                    try:
+                        agent_record = db.query(models.Agent).filter(models.Agent.name == name).first()
+                        if agent_record and agent_record.routing_summary:
+                            routing_summary = agent_record.routing_summary
+                            print(f"✅ [{i+1}] Agent: '{name}' - Using routing summary from name lookup ({len(routing_summary)} chars)")
+                        elif agent_record:
+                            print(f"⚠️ [{i+1}] Agent: '{name}' - Found agent by name but no routing summary")
+                        else:
+                            print(f"⚠️ [{i+1}] Agent: '{name}' - No agent found by name in database")
+                    finally:
+                        db.close()
+                except Exception as e:
+                    print(f"❌ [{i+1}] Agent: '{name}' - Failed name-based routing summary lookup: {e}")
+            
+            # Build description using routing summary if available, otherwise fall back to system prompt
+            if routing_summary:
+                description = f"- {name} (ID: {agent['id']}): {routing_summary}\n  {tools_text}"
+            else:
+                # Fallback to system prompt (old behavior)
+                system_prompt = agent['data'].get('systemPrompt', '')
+                print(f"🔍 [{i+1}] Agent: '{name}' - Using system prompt fallback ({len(system_prompt)} chars), {tools_text}")
+                
+                if system_prompt:
+                    # Use more of the system prompt for better context, but keep reasonable
+                    prompt_excerpt = system_prompt[:300] + ("..." if len(system_prompt) > 300 else "")
+                    description = f"- {name} (ID: {agent['id']}): {prompt_excerpt}\n  {tools_text}"
+                else:
+                    description = f"- {name} (ID: {agent['id']}): General purpose agent\n  {tools_text}"
             
             agent_descriptions.append(description)
         
         agents_text = '\n'.join(agent_descriptions)
         
-        # Use router's system prompt if available
-        router_system_prompt = persona_router_config.get('systemPrompt', '')
-        base_prompt = router_system_prompt if router_system_prompt else "You are an intelligent routing system that analyzes user requests and selects the most appropriate specialist agent."
-        
-        system_prompt = f"""{base_prompt}
+        # Use a very safe, neutral routing prompt to avoid content policy issues
+        system_prompt = f"""You are a routing assistant that matches user requests to appropriate specialist agents.
 
-Available agents with their capabilities and configured tools:
+Available agents:
 {agents_text}
 
-Instructions:
-1. Analyze the user's request carefully
-2. Consider each agent's system prompt to understand their specialization  
-3. Consider each agent's available tools to see what actions they can perform
-4. Select the agent whose combination of expertise AND tools best matches the user's needs
-5. If multiple agents could handle the request, choose the most specialized one
+Task: Analyze the user request and select the most suitable agent based on their capabilities and available tools.
 
-Respond with ONLY the agent ID and confidence score (0.0-1.0) in this format:
-agent_id:confidence_score
+Response format: agent_id:confidence_score
 
-If no agent is clearly appropriate, respond with:
-none:0.0"""
+For example:
+- If the request matches an agent's expertise: agent_1234:0.9
+- If no clear match exists: none:0.0
+
+Choose the agent whose capabilities best align with the user's needs."""
 
         print(f"🚀 PERSONA ROUTER: Calling LLM for agent selection...")
+        
+        # DEBUG: Print the entire system prompt being sent to LLM
+        print(f"\n{'='*80}")
+        print(f"🔍 DEBUG: FULL SYSTEM PROMPT BEING SENT TO LLM")
+        print(f"{'='*80}")
+        print(system_prompt)
+        print(f"{'='*80}")
+        print(f"🔍 DEBUG: USER INPUT: '{user_input}'")
+        print(f"{'='*80}\n")
         
         # Try to get LLM client - prefer workflow LLM, fallback to instance client
         client_to_use = self.client
@@ -430,15 +489,23 @@ none:0.0"""
         
         try:
             print(f"🚀 PERSONA ROUTER: Calling {model_to_use} for intelligent agent selection...")
-            response = client_to_use.chat.completions.create(
-                model=model_to_use,
-                messages=[
+            # Build API parameters with model-specific token parameter
+            api_params = {
+                "model": model_to_use,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_input}
                 ],
-                max_tokens=50,
-                temperature=0.1
-            )
+                "temperature": 1.0 if model_to_use and "gpt-5" in model_to_use else 0.1
+            }
+            
+            # Use appropriate token parameter based on model
+            if model_to_use and ("gpt-4o" in model_to_use or "gpt-5" in model_to_use):
+                api_params["max_completion_tokens"] = 50
+            else:
+                api_params["max_tokens"] = 50
+            
+            response = client_to_use.chat.completions.create(**api_params)
             
             result = response.choices[0].message.content.strip()
             print(f"📝 PERSONA ROUTER: LLM response: {result}")

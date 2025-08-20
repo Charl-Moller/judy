@@ -539,12 +539,29 @@ DO NOT give up after one failed attempt. Always try at least 2-3 different appro
                     ]
                 })
                 
-                # Add tool results
+                # Add tool results (with truncation to prevent token limit issues)
                 for tool_result in tool_results:
+                    result_content = json.dumps(tool_result["result"])
+                    
+                    # Truncate large tool results to prevent token limit exceeded errors
+                    max_tool_result_length = 50000  # ~50k characters limit per tool result
+                    if len(result_content) > max_tool_result_length:
+                        truncated_content = result_content[:max_tool_result_length]
+                        # Try to end at a reasonable JSON boundary
+                        last_brace = truncated_content.rfind('}')
+                        last_bracket = truncated_content.rfind(']')
+                        cutoff_point = max(last_brace, last_bracket) if max(last_brace, last_bracket) > max_tool_result_length - 1000 else max_tool_result_length
+                        
+                        truncated_content = result_content[:cutoff_point]
+                        truncated_content += f'... [TRUNCATED: Original response was {len(result_content)} characters, showing first {cutoff_point}]'
+                        
+                        print(f"⚠️ [{agent.name}] Tool result truncated: {len(result_content)} -> {len(truncated_content)} characters")
+                        result_content = truncated_content
+                    
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_result["tool_call_id"],
-                        "content": json.dumps(tool_result["result"])
+                        "content": result_content
                     })
                 
                 # Make another API call to get the final response
@@ -636,12 +653,29 @@ DO NOT give up after one failed attempt. Always try at least 2-3 different appro
                         ]
                     })
                     
-                    # Add additional tool results
+                    # Add additional tool results (with truncation)
                     for additional_result in additional_results:
+                        result_content = json.dumps(additional_result["result"])
+                        
+                        # Truncate large additional tool results
+                        max_tool_result_length = 50000  # ~50k characters limit per tool result
+                        if len(result_content) > max_tool_result_length:
+                            truncated_content = result_content[:max_tool_result_length]
+                            # Try to end at a reasonable JSON boundary
+                            last_brace = truncated_content.rfind('}')
+                            last_bracket = truncated_content.rfind(']')
+                            cutoff_point = max(last_brace, last_bracket) if max(last_brace, last_bracket) > max_tool_result_length - 1000 else max_tool_result_length
+                            
+                            truncated_content = result_content[:cutoff_point]
+                            truncated_content += f'... [TRUNCATED: Original response was {len(result_content)} characters, showing first {cutoff_point}]'
+                            
+                            print(f"⚠️ [{agent.name}] Additional tool result truncated: {len(result_content)} -> {len(truncated_content)} characters")
+                            result_content = truncated_content
+                        
                         messages.append({
                             "role": "tool",
                             "tool_call_id": additional_result["tool_call_id"],
-                            "content": json.dumps(additional_result["result"])
+                            "content": result_content
                         })
                     
                     # Make another call to get refined response

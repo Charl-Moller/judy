@@ -26,13 +26,15 @@ interface AgentCanvasHeaderProps {
   onSave?: () => void
   onExecute?: () => void
   onBack?: () => void
+  onOpenTestChat?: () => void
 }
 
 const AgentCanvasHeader: React.FC<AgentCanvasHeaderProps> = ({ 
   agentName, 
   onSave, 
   onExecute,
-  onBack 
+  onBack,
+  onOpenTestChat 
 }) => {
   const { reactFlowInstance } = useFlow()
   const { openTestPanel, isExecuting } = useExecution()
@@ -88,8 +90,13 @@ const AgentCanvasHeader: React.FC<AgentCanvasHeaderProps> = ({
       return
     }
 
-    // Open test panel instead of executing directly
-    openTestPanel()
+    // Use new integrated test chat instead of overlay
+    if (onOpenTestChat) {
+      onOpenTestChat()
+    } else {
+      // Fallback to old overlay method
+      openTestPanel()
+    }
   }
 
   const handleZoomIn = () => {

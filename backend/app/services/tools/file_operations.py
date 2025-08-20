@@ -130,28 +130,69 @@ def parse_csv(file_path: str, delimiter: str = ",", has_header: bool = True):
 def create_csv(file_path: str, data: list, headers: list = None):
     """Create CSV file from list of dictionaries or lists."""
     try:
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        # Determine the final file path - use downloads directory for public access
+        downloads_dir = Path(__file__).parent.parent.parent.parent / "public" / "downloads"
+        downloads_dir.mkdir(parents=True, exist_ok=True)
         
-        with open(file_path, 'w', newline='', encoding='utf-8') as file:
-            if isinstance(data[0], dict):
-                # Data is list of dictionaries
-                fieldnames = headers or list(data[0].keys())
-                writer = csv.DictWriter(file, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(data)
-            else:
-                # Data is list of lists
-                writer = csv.writer(file)
-                if headers:
-                    writer.writerow(headers)
-                writer.writerows(data)
+        # Generate a unique filename if only name provided, otherwise use the provided path
+        if "/" not in file_path and "\\" not in file_path:
+            # Just a filename, save to downloads directory
+            filename = file_path if file_path.endswith('.csv') else f"{file_path}.csv"
+            # Add timestamp to make it unique
+            import time
+            timestamp = int(time.time())
+            base_name = filename.rsplit('.csv', 1)[0]
+            final_filename = f"{base_name}_{timestamp}.csv"
+            final_file_path = downloads_dir / final_filename
+        else:
+            # Full path provided, but also copy to downloads for URL access
+            final_file_path = Path(file_path)
+            os.makedirs(final_file_path.parent, exist_ok=True)
+            
+            # Also create a copy in downloads directory for URL access
+            filename = final_file_path.name
+            import time
+            timestamp = int(time.time())
+            base_name = filename.rsplit('.csv', 1)[0]
+            download_filename = f"{base_name}_{timestamp}.csv"
+            download_file_path = downloads_dir / download_filename
+        
+        # Write CSV data
+        def write_csv_data(file_path):
+            with open(file_path, 'w', newline='', encoding='utf-8') as file:
+                if isinstance(data[0], dict):
+                    # Data is list of dictionaries
+                    fieldnames = headers or list(data[0].keys())
+                    writer = csv.DictWriter(file, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(data)
+                else:
+                    # Data is list of lists
+                    writer = csv.writer(file)
+                    if headers:
+                        writer.writerow(headers)
+                    writer.writerows(data)
+        
+        # Save the file
+        write_csv_data(str(final_file_path))
+        
+        # If we created a separate download copy, save that too
+        if 'download_file_path' in locals():
+            write_csv_data(str(download_file_path))
+            download_url = f"http://localhost:8000/files/download/{download_filename}"
+            public_filename = download_filename
+        else:
+            download_url = f"http://localhost:8000/files/download/{final_file_path.name}"
+            public_filename = final_file_path.name
         
         return {
             "success": True,
-            "file_path": file_path,
+            "file_path": str(final_file_path),
+            "download_url": download_url,
+            "public_filename": public_filename,
             "rows_written": len(data),
             "attachments": [
-                {"type": "text", "content": f"Created CSV file: {file_path} with {len(data)} rows"}
+                {"type": "text", "content": f"✅ Created CSV file: {public_filename} with {len(data)} rows\n\n📥 Download link: {download_url}"}
             ]
         }
     except Exception as e:
@@ -164,9 +205,34 @@ def create_excel(file_path: str, data: list, sheet_name: str = "Sheet1", headers
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment
+        import uuid
         
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        # Determine the final file path - use downloads directory for public access
+        downloads_dir = Path(__file__).parent.parent.parent.parent / "public" / "downloads"
+        downloads_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate a unique filename if only name provided, otherwise use the provided path
+        if "/" not in file_path and "\\" not in file_path:
+            # Just a filename, save to downloads directory
+            filename = file_path if file_path.endswith('.xlsx') else f"{file_path}.xlsx"
+            # Add timestamp to make it unique
+            import time
+            timestamp = int(time.time())
+            base_name = filename.rsplit('.xlsx', 1)[0]
+            final_filename = f"{base_name}_{timestamp}.xlsx"
+            final_file_path = downloads_dir / final_filename
+        else:
+            # Full path provided, but also copy to downloads for URL access
+            final_file_path = Path(file_path)
+            os.makedirs(final_file_path.parent, exist_ok=True)
+            
+            # Also create a copy in downloads directory for URL access
+            filename = final_file_path.name
+            import time
+            timestamp = int(time.time())
+            base_name = filename.rsplit('.xlsx', 1)[0]
+            download_filename = f"{base_name}_{timestamp}.xlsx"
+            download_file_path = downloads_dir / download_filename
         
         # Create workbook and select active sheet
         wb = Workbook()
@@ -230,16 +296,27 @@ def create_excel(file_path: str, data: list, sheet_name: str = "Sheet1", headers
             ws.column_dimensions[column_letter].width = adjusted_width
         
         # Save the workbook
-        wb.save(file_path)
+        wb.save(str(final_file_path))
+        
+        # If we created a separate download copy, save that too
+        if 'download_file_path' in locals():
+            wb.save(str(download_file_path))
+            download_url = f"http://localhost:8000/files/download/{download_filename}"
+            public_filename = download_filename
+        else:
+            download_url = f"http://localhost:8000/files/download/{final_file_path.name}"
+            public_filename = final_file_path.name
         
         return {
             "success": True,
-            "file_path": file_path,
+            "file_path": str(final_file_path),
+            "download_url": download_url,
+            "public_filename": public_filename,
             "sheet_name": sheet_name,
             "rows_written": len(data),
             "columns": len(headers or (list(data[0].keys()) if isinstance(data[0], dict) else data[0])),
             "attachments": [
-                {"type": "text", "content": f"Created Excel file: {file_path} with {len(data)} rows in sheet '{sheet_name}'"}
+                {"type": "text", "content": f"✅ Created Excel file: {public_filename} with {len(data)} rows in sheet '{sheet_name}'\n\n📥 Download link: {download_url}"}
             ]
         }
     except Exception as e:

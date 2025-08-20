@@ -6,6 +6,16 @@ from .db.database import engine
 from .db import models
 from .routers import agents, capabilities, chat, files, llm_configs, rag_indexes, orchestrator, workflows, agent_builder, tools, mcp_servers
 import os
+import logging
+
+# Configure logging to show debug messages
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Set specific logger for MCP manager to DEBUG level
+logging.getLogger('app.services.mcp_manager').setLevel(logging.DEBUG)
 
 app = FastAPI(title="Multi-Agent AI Assistant API", version="1.0.0")
 

@@ -12,6 +12,7 @@ import json
 import logging
 from datetime import datetime
 from ..db import models
+from .data_processor import create_data_processor
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class MCPManager:
         self.connected_clients = {}  # server_id -> Client
         self.available_tools = {}    # server_id -> {tool_name: tool_info}
         self._fastmcp_server = None  # Our own MCP server instance
+        self.data_processor = create_data_processor()  # Data processing service
     
     async def initialize(self):
         """Initialize the MCP manager and load configured servers"""
@@ -302,24 +304,102 @@ class MCPManager:
             tool_url = f"{client_info['url']}/tools/{tool_name}"
             payload = {"arguments": arguments}
             
+            # 🔍 DEBUG: Log the actual API call details
+            logger.info(f"🔍 [ServiceNow API DEBUG] Tool: {tool_name}")
+            logger.info(f"🔍 [ServiceNow API DEBUG] URL: {tool_url}")
+            logger.info(f"🔍 [ServiceNow API DEBUG] Arguments: {json.dumps(arguments)}")
+            logger.info(f"🔍 [ServiceNow API DEBUG] Headers: {dict(client_info['headers'])}")
+            logger.info(f"🔍 [ServiceNow API DEBUG] Full Payload: {json.dumps(payload)}")
+            
+            # 🔍 DEBUG: Extract key query details for easier analysis
+            if 'query' in arguments:
+                logger.info(f"🔍 [ServiceNow API DEBUG] QUERY STRING: '{arguments['query']}'")
+            if 'limit' in arguments:
+                logger.info(f"🔍 [ServiceNow API DEBUG] LIMIT: {arguments['limit']}")
+                
+            logger.info(f"🔍 [ServiceNow API DEBUG] === API CALL START ===")
+            
             response = await client.post(tool_url, json=payload, headers=client_info['headers'])
+            
+            # 🔍 DEBUG: Log the response details
+            logger.info(f"🔍 [ServiceNow API DEBUG] === API CALL END ===")
+            logger.info(f"🔍 [ServiceNow API DEBUG] Response Status: {response.status_code}")
+            logger.info(f"🔍 [ServiceNow API DEBUG] Response Headers: {dict(response.headers)}")
+            
             response.raise_for_status()
             
             result = response.json()
             
+            # 🔍 DEBUG: Log the raw response
+            logger.info(f"🔍 [ServiceNow API DEBUG] Raw Response: {json.dumps(result, indent=2)}")
+            
             # Handle ServiceNow-style error responses
             if result.get('isError'):
-                raise Exception(f"Tool error: {result['content'][0]['text']}")
+                error_msg = f"Tool error: {result['content'][0]['text']}"
+                logger.error(f"❌ [ServiceNow API DEBUG] Error Response: {error_msg}")
+                raise Exception(error_msg)
             
             # Parse the text content as JSON if possible
             if 'content' in result and len(result['content']) > 0:
                 content_text = result['content'][0]['text']
+                logger.info(f"🔍 [ServiceNow API DEBUG] Content Text: {content_text[:500]}..." if len(content_text) > 500 else f"🔍 [ServiceNow API DEBUG] Content Text: {content_text}")
                 try:
-                    return json.loads(content_text)
+                    parsed_content = json.loads(content_text)
+                    logger.info(f"🔍 [ServiceNow API DEBUG] Parsed JSON Content Length: {len(parsed_content) if isinstance(parsed_content, list) else 'Not a list'}")
+                    
+                    # 🚀 INTELLIGENT DATA PROCESSING
+                    if isinstance(parsed_content, list) and len(parsed_content) > 50:
+                        logger.info(f"📊 Large dataset detected ({len(parsed_content)} items). Processing with pandas...")
+                        
+                        # Detect query type from tool name and arguments
+                        query_type = self._detect_query_type(tool_name, arguments)
+                        
+                        # Process large dataset
+                        processed_result = self.data_processor.process_servicenow_incidents(
+                            parsed_content, 
+                            query_type
+                        )
+                        
+                        logger.info(f"✅ Data processing complete. Returning summarized data instead of raw {len(parsed_content)} items")
+                        return processed_result
+                    
+                    logger.info(f"🔍 [ServiceNow API DEBUG] Returning raw JSON (small dataset)")
+                    return parsed_content
                 except json.JSONDecodeError:
+                    logger.info(f"🔍 [ServiceNow API DEBUG] Content is not JSON, returning as text")
                     return content_text
             
+            logger.info(f"🔍 [ServiceNow API DEBUG] Returning raw result: {json.dumps(result, indent=2)}")
             return result
+    
+    def _detect_query_type(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+        """Detect the type of query based on tool name and arguments for intelligent processing"""
+        
+        # Check query content for grouping keywords
+        query = arguments.get('query', '').lower()
+        
+        if tool_name == 'list_incidents':
+            # Check for company-related patterns
+            if any(term in query for term in ['company', 'customer', 'client']):
+                return 'top_companies'
+            
+            # Check for assignment group patterns  
+            if 'assignment_group' in query:
+                return 'top_teams'
+            
+            # Check for status patterns
+            if any(term in query for term in ['state', 'status', 'closed', 'resolved']):
+                return 'status_analysis'
+            
+            # Check for priority patterns
+            if 'priority' in query:
+                return 'priority_analysis'
+            
+            # Default for large incident lists
+            if arguments.get('limit', 0) > 100:
+                return 'top_companies'  # Assume company grouping for large datasets
+        
+        return 'general'
     
     def create_fastmcp_server(self) -> FastMCP:
         """Create and configure our own FastMCP server for exposing internal tools"""

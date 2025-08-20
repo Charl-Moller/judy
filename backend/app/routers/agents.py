@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from ..db.database import get_db
 from ..db import models
+from ..services.prompt_processor import generate_agent_routing_summary
 import uuid
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
@@ -44,6 +45,18 @@ def create_agent(payload: dict, db: Session = Depends(get_db)):
         llm_config_id=payload["llm_config_id"],
         status=payload.get("status", "active")
     )
+    
+    # Generate routing summary for persona router
+    system_prompt = payload.get("system_prompt", "")
+    if system_prompt and system_prompt.strip():
+        try:
+            routing_summary = generate_agent_routing_summary(system_prompt, payload["name"])
+            if routing_summary:
+                agent.routing_summary = routing_summary
+                print(f"✅ Generated routing summary for agent '{payload['name']}'")
+        except Exception as e:
+            print(f"⚠️ Failed to generate routing summary for agent '{payload['name']}': {e}")
+    
     db.add(agent)
     db.commit()
     db.refresh(agent)
@@ -87,6 +100,21 @@ def update_agent(agent_id: str, payload: dict, db: Session = Depends(get_db)):
         agent.description = payload["description"]
     if "system_prompt" in payload:
         agent.system_prompt = payload["system_prompt"]
+        
+        # Regenerate routing summary when system prompt changes
+        system_prompt = payload["system_prompt"]
+        if system_prompt and system_prompt.strip():
+            try:
+                routing_summary = generate_agent_routing_summary(system_prompt, agent.name)
+                if routing_summary:
+                    agent.routing_summary = routing_summary
+                    print(f"✅ Updated routing summary for agent '{agent.name}'")
+            except Exception as e:
+                print(f"⚠️ Failed to update routing summary for agent '{agent.name}': {e}")
+        else:
+            # Clear routing summary if system prompt is removed
+            agent.routing_summary = None
+            
     if "status" in payload:
         agent.status = payload["status"]
     
@@ -152,6 +180,19 @@ def duplicate_agent(agent_id: str, payload: dict, db: Session = Depends(get_db))
         status=payload.get("status", "active"),
         llm_config_id=original.llm_config_id
     )
+    
+    # Generate routing summary for duplicated agent
+    if original.system_prompt and original.system_prompt.strip():
+        try:
+            routing_summary = generate_agent_routing_summary(original.system_prompt, payload["name"])
+            if routing_summary:
+                duplicate.routing_summary = routing_summary
+                print(f"✅ Generated routing summary for duplicated agent '{payload['name']}'")
+        except Exception as e:
+            print(f"⚠️ Failed to generate routing summary for duplicated agent '{payload['name']}': {e}")
+    elif original.routing_summary:
+        # If original has routing summary but no system prompt, copy the routing summary
+        duplicate.routing_summary = original.routing_summary
     
     db.add(duplicate)
     db.commit()
