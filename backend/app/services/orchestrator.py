@@ -301,6 +301,9 @@ DO NOT give up after one failed attempt. Always try at least 2-3 different appro
             
             print(f"📚 [{agent.name}] Adding {len(conversation_history)} conversation turns to context")
             print(f"⚙️ [{agent.name}] Include system messages: {include_system}")
+            print(f"🔍 [{agent.name}] FULL CONVERSATION HISTORY DEBUG:")
+            for i, turn in enumerate(conversation_history):
+                print(f"  Turn {i}: {turn}")
             
             # Add previous conversation turns
             for i, turn in enumerate(conversation_history):
@@ -421,6 +424,10 @@ DO NOT give up after one failed attempt. Always try at least 2-3 different appro
         
         # Make the API call
         print(f"🚀 [{agent.name}] Calling {model_name} with {len(messages)} messages...")
+        print(f"🔍 [{agent.name}] FINAL MESSAGES ARRAY SENT TO LLM:")
+        for i, msg in enumerate(messages):
+            content_preview = msg.get('content', '')[:100] if msg.get('content') else 'No content'
+            print(f"  [{i}] {msg.get('role', 'unknown')}: {content_preview}...")
         response = client.chat.completions.create(**api_params)
         
         # Get the response message
@@ -894,6 +901,36 @@ DO NOT give up after one failed attempt. Always try at least 2-3 different appro
             {"role": "system", "content": system_content}
         ]
         
+        # Handle conversation history for memory - STREAMING VERSION
+        print(f"\n💾 [{agent.name}] STREAMING MEMORY PROCESSING")
+        print(f"📝 [{agent.name}] Context keys: {list(prev_output.keys())}")
+        print(f"💬 [{agent.name}] Conversation history: {len(prev_output.get('conversation_history', []))} messages" if prev_output.get('conversation_history') else f"💬 [{agent.name}] No conversation history")
+        
+        if prev_output.get("conversation_history"):
+            # Add conversation history to messages
+            conversation_history = prev_output["conversation_history"]
+            include_system = prev_output.get("include_system_messages", True)
+            
+            print(f"📚 [{agent.name}] STREAMING: Adding {len(conversation_history)} conversation turns to context")
+            print(f"⚙️ [{agent.name}] STREAMING: Include system messages: {include_system}")
+            print(f"🔍 [{agent.name}] STREAMING FULL CONVERSATION HISTORY DEBUG:")
+            for i, turn in enumerate(conversation_history):
+                print(f"  Turn {i}: {turn}")
+            
+            # Add previous conversation turns
+            for i, turn in enumerate(conversation_history):
+                print(f"📄 [{agent.name}] STREAMING: Adding turn {i+1}: {turn.get('role')} - {turn.get('content', '')[:50]}...")
+                if turn.get("role") == "user":
+                    messages.append({"role": "user", "content": turn.get("content", "")})
+                elif turn.get("role") == "assistant":
+                    messages.append({"role": "assistant", "content": turn.get("content", "")})
+                elif turn.get("role") == "system" and include_system:
+                    # Add system message from previous conversation
+                    messages.append({"role": "system", "content": turn.get("content", "")})
+        elif prev_output.get("response"):
+            # Fallback to old behavior
+            system_content += f"Previous context: {prev_output['response']} "
+        
         # For vision models, include image data in the user message
         if files and "image_analysis" in caps and supports_vision:
             # Load and encode the image files
@@ -995,6 +1032,11 @@ DO NOT give up after one failed attempt. Always try at least 2-3 different appro
             api_params["temperature"] = temperature
         
         # Make the streaming API call
+        print(f"🚀 [{agent.name}] STREAMING: Calling {model_name} with {len(messages)} messages...")
+        print(f"🔍 [{agent.name}] STREAMING FINAL MESSAGES ARRAY SENT TO LLM:")
+        for i, msg in enumerate(messages):
+            content_preview = msg.get('content', '')[:100] if msg.get('content') else 'No content'
+            print(f"  [{i}] {msg.get('role', 'unknown')}: {content_preview}...")
         response = client.chat.completions.create(**api_params)
         
         # Stream the response chunks

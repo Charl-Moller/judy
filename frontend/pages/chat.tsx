@@ -136,7 +136,7 @@ const AgentSidebar = memo(({
     <motion.aside 
       initial={{ x: -300 }}
       animate={{ x: showAgents ? 0 : -300 }}
-      className="w-80 bg-white/80 backdrop-blur-xl border-r border-gray-200 flex flex-col fixed h-full z-10 lg:relative"
+      className="w-80 bg-white/80 backdrop-blur-xl border-r border-gray-200 flex flex-col fixed h-full z-10"
     >
       {/* Sidebar Header */}
       <div className="p-4 border-b border-gray-200">
@@ -218,6 +218,7 @@ function ChatInterface() {
   const [files, setFiles] = useState<File[]>([])
   const [conversationHistory, setConversationHistory] = useState<Array<{id: string, type: 'user' | 'assistant', content: string}>>([])
   const [isExecuting, setIsExecuting] = useState(false)
+  const [currentStatus, setCurrentStatus] = useState<string | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -436,6 +437,12 @@ function ChatInterface() {
                       
                       // Small delay to make streaming visible
                       await new Promise(resolve => setTimeout(resolve, 10))
+                    } else if (parsed.status && parsed.type === 'status') {
+                      // Handle status updates
+                      setCurrentStatus(parsed.status)
+                    } else if (parsed.done) {
+                      // Clear status when done
+                      setCurrentStatus(null)
                     }
                   } catch (e) {
                     // Skip invalid JSON lines
@@ -485,6 +492,7 @@ function ChatInterface() {
       })
     } finally {
       setIsExecuting(false)
+      setCurrentStatus(null) // Clear status when execution finishes
     }
   }
 
@@ -504,7 +512,7 @@ function ChatInterface() {
       />
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className={`flex-1 flex flex-col transition-all duration-300 ${showAgents ? 'ml-80' : 'ml-0'}`}>
         {selectedAgent ? (
           <>
             {/* Chat Header */}
@@ -539,7 +547,7 @@ function ChatInterface() {
             </div>
 
             {/* Messages or Welcome Screen */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto pb-40">
               {conversationHistory.length === 0 ? (
                 /* Welcome Screen with Suggested Prompts */
                 <div className="max-w-4xl mx-auto p-6">
@@ -617,8 +625,8 @@ function ChatInterface() {
               )}
             </div>
 
-            {/* Input Area */}
-            <div className="bg-white/80 backdrop-blur-xl border-t border-gray-200 p-4">
+            {/* Input Area - Fixed/Floating */}
+            <div className="fixed bottom-4 right-4 left-4 bg-white/95 backdrop-blur-xl border border-gray-200 rounded-2xl p-6 shadow-2xl z-50 transition-all duration-300" style={{ marginLeft: showAgents ? '320px' : '0px' }}>
               <div className="max-w-4xl mx-auto">
                 {/* File Preview */}
                 {files.length > 0 && (
@@ -635,6 +643,20 @@ function ChatInterface() {
                         </button>
                       </div>
                     ))}
+                  </div>
+                )}
+                
+                {/* Workflow Status Display */}
+                {currentStatus && (
+                  <div className="mb-3 px-4 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div className="flex items-center gap-2 text-blue-700">
+                      <div className="flex space-x-1">
+                        <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse"></div>
+                        <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                        <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                      </div>
+                      <span className="text-sm font-medium">{currentStatus}</span>
+                    </div>
                   </div>
                 )}
                 

@@ -405,6 +405,11 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
         conversation_history = payload.get("conversation_history", [])
         attached_files = payload.get("files", [])
         
+        print(f"🔑 CHAT ROUTER STREAM: Received session_id: {session_id}")
+        print(f"📚 CHAT ROUTER STREAM: Received conversation_history: {len(conversation_history)} messages")
+        for i, msg in enumerate(conversation_history):
+            print(f"  [{i}] {msg.get('role', 'unknown')}: {msg.get('content', '')[:50]}...")
+        
         # Process attached files (same logic as non-streaming)
         file_context = {}
         if attached_files:
@@ -468,6 +473,9 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
         else:
             print(f"\n⚠️ WORKFLOW: No valid starting point found")
         
+        # Store routing info for status updates
+        routing_info = None
+        
         # Handle persona router orchestrator pattern
         if persona_router_node:
             from ..services.persona_router import route_to_agent
@@ -493,6 +501,13 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
                         any(n.get("id") == connection.get("target") and n.get("type") == "llm" for n in nodes)):
                         llm_node_for_router = next(n for n in nodes if n.get("id") == connection.get("target"))
                         break
+                
+                # Store routing info for status updates during streaming
+                routing_info = {
+                    "persona_router_name": persona_router_node.get('data', {}).get('name', 'Persona Router'),
+                    "available_agents": [a.get('data', {}).get('name', 'Unnamed') for a in connected_agents],
+                    "user_input": user_input
+                }
                 
                 # Route user input to appropriate connected agent (pass LLM config for intelligent routing)
                 router_config = persona_router_node.get("data", {})
@@ -698,10 +713,23 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
             selected_agent_name = None
             
             try:
+                # Send initial status update
+                if routing_info:
+                    yield f"data: {json.dumps({'status': f'Persona router analyzing request...', 'type': 'status'})}\n\n"
+                    await asyncio.sleep(0.1)  # Small delay for better UX
+                    
+                    available_agents_text = ', '.join(routing_info['available_agents'])
+                    yield f"data: {json.dumps({'status': f'Considering best agent from: {available_agents_text}', 'type': 'status'})}\n\n"
+                    await asyncio.sleep(0.1)
+                
                 # Record agent handoff if using persona router
                 if persona_router_node and session_id:
                     selected_agent_id = str(temp_agent.id)
                     selected_agent_name = temp_agent.name
+                    
+                    # Send agent selection status
+                    yield f"data: {json.dumps({'status': f'Selected {selected_agent_name} for this task', 'type': 'status'})}\n\n"
+                    await asyncio.sleep(0.1)
                     
                     # Save user message to shared memory first
                     shared_memory_service.add_message_to_shared_context(
@@ -731,6 +759,11 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
                         'agent_header': True  # Signal to frontend to show agent header, no content prefix
                     }
                     yield f"data: {json.dumps(agent_info)}\n\n"
+                
+                # Send agent working status
+                agent_display_name = temp_agent.name if persona_router_node else primary_node.get('data', {}).get('name', 'Agent')
+                yield f"data: {json.dumps({'status': f'{agent_display_name} is processing your request...', 'type': 'status'})}\n\n"
+                await asyncio.sleep(0.1)
                 
                 # Execute the agent using existing streaming infrastructure
                 from ..services.orchestrator import execute_single_agent_stream

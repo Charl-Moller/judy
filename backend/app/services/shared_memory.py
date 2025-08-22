@@ -23,6 +23,7 @@ class SharedMemoryService:
     
     def get_or_create_shared_session(self, db: Session, session_id: str) -> models.SharedSession:
         """Get existing shared session or create a new one"""
+        print(f"🔍 SHARED MEMORY: Looking for session_id: {session_id}")
         shared_session = db.query(models.SharedSession).filter(
             models.SharedSession.session_id == session_id
         ).first()
@@ -39,7 +40,10 @@ class SharedMemoryService:
             )
             db.add(shared_session)
             db.commit()
-            print(f"🆕 Created new shared session: {session_id}")
+            print(f"🆕 SHARED MEMORY: Created new shared session: {session_id}")
+        else:
+            history_count = len(shared_session.conversation_history) if hasattr(shared_session, 'conversation_history') and shared_session.conversation_history else 0
+            print(f"✅ SHARED MEMORY: Found existing session: {session_id} with {history_count} messages")
         
         return shared_session
     

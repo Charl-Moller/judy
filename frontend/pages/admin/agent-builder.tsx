@@ -27,6 +27,9 @@ const TestChatPanel = ({ currentAgent, onClose }: { currentAgent: any; onClose: 
   
   const { reactFlowInstance } = useFlow()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  
+  // Create a persistent session ID that stays the same throughout this test session
+  const [sessionId] = useState(() => `agent_builder_test_${Date.now()}`)
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -139,21 +142,30 @@ const TestChatPanel = ({ currentAgent, onClose }: { currentAgent: any; onClose: 
             })
             
             console.log('🌊 CALLING STREAMING ENDPOINT:', `${apiBase}/chat/workflow/stream`)
+            console.log('🔑 SESSION ID BEING SENT:', sessionId)
+            console.log('📚 CONVERSATION HISTORY BEING SENT:', conversationHistory.length, 'messages')
+            conversationHistory.forEach((msg, i) => {
+              console.log(`  [${i}] ${msg.type}: ${msg.content.substring(0, 50)}...`)
+            })
+            
+            const requestPayload = {
+              nodes: nodes,
+              connections: edges,
+              input: input,
+              session_id: sessionId,
+              conversation_history: conversationHistory.map(msg => ({
+                role: msg.type === 'user' ? 'user' : 'assistant',
+                content: msg.content
+              }))
+            }
+            
+            console.log('🚀 FULL REQUEST PAYLOAD:', JSON.stringify(requestPayload, null, 2))
             
             // Use streaming endpoint for real-time responses
             const response = await fetch(`${apiBase}/chat/workflow/stream`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                nodes: nodes,
-                connections: edges,
-                input: input,
-                session_id: `agent_builder_test_${Date.now()}`,
-                conversation_history: conversationHistory.map(msg => ({
-                  role: msg.type === 'user' ? 'user' : 'assistant',
-                  content: msg.content
-                }))
-              })
+              body: JSON.stringify(requestPayload)
             })
             
             if (!response.ok) throw new Error('Streaming request failed')
@@ -234,7 +246,7 @@ const TestChatPanel = ({ currentAgent, onClose }: { currentAgent: any; onClose: 
                 nodes: nodes,
                 connections: edges,
                 input: input,
-                session_id: `agent_builder_test_${Date.now()}`,
+                session_id: sessionId,
                 conversation_history: conversationHistory.map(msg => ({
                   role: msg.type === 'user' ? 'user' : 'assistant',
                   content: msg.content
