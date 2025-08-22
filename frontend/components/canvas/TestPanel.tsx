@@ -71,6 +71,8 @@ const TestPanel: React.FC = () => {
     startExecution,
     stopExecution,
     addMessage,
+    updateMessage,
+    getLatestConversationHistory,
     addLog,
     clearHistory,
     clearLogs
@@ -95,7 +97,9 @@ const TestPanel: React.FC = () => {
   }, [executionLogs])
 
   const handleSendMessage = async () => {
+    console.log('🚨 TEST LAB: handleSendMessage called')
     if (!currentInput.trim() || isExecuting || !reactFlowInstance) {
+      console.log('🚨 TEST LAB: Early return - input:', currentInput.trim(), 'isExecuting:', isExecuting, 'reactFlowInstance:', !!reactFlowInstance)
       return
     }
 
@@ -212,36 +216,198 @@ const TestPanel: React.FC = () => {
 
       // Call actual API if available
       const apiBase = process.env.NEXT_PUBLIC_API_BASE || ''
+      
+      // Debug API base
+      addLog({
+        level: 'debug',
+        message: `🔍 TEST LAB: API Base = "${apiBase}", will call API: ${!!apiBase}`
+      })
+      
+      // CRITICAL: Debug if this code block is executed
+      addLog({
+        level: 'debug',
+        message: '🚨 TEST LAB: About to check if apiBase exists and enter API call block'
+      })
+      
       if (apiBase) {
         addLog({
           level: 'info',
           message: '🌐 Sending request to execution API...'
         })
 
+        // ALWAYS log this to confirm Test Lab is executing this code
+        addLog({
+          level: 'debug',
+          message: `🔍 TEST LAB DEBUG: About to check streaming detection with ${nodes.length} nodes`
+        })
+
         try {
-          const response = await fetch(`${apiBase}/chat/workflow`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              nodes: nodes,
-              connections: edges,
-              input: input,
-              session_id: `canvas_test_${Date.now()}`,
-              conversation_history: conversationHistory.map(msg => ({
-                role: msg.type === 'user' ? 'user' : 'assistant',
-                content: msg.content
-              }))
-            })
-          })
-
-          if (!response.ok) {
-            const errorData = await response.json()
-            throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`)
+          // First, log ALL nodes to understand the structure
+          console.log('🔍 ALL Test Lab Nodes:', nodes.map(n => ({
+            id: n.id,
+            type: n.type,
+            data: n.data
+          })))
+          
+          // Check if any agent node has streaming enabled - check both type and nodeType
+          const hasStreamingAgent = nodes.some((node: any) => 
+            (node.type === 'agent' || node.data?.nodeType === 'agent') && node.data?.streamResponse === true
+          )
+          
+          // Debug streaming detection
+          const debugInfo = {
+            nodeCount: nodes.length,
+            allNodes: nodes.map((node: any) => ({
+              id: node.id,
+              type: node.type,
+              data: node.data
+            })),
+            agentNodes: nodes.filter((node: any) => node.type === 'agent' || node.data?.nodeType === 'agent').map((node: any) => ({
+              id: node.id,
+              type: node.type,
+              nodeType: node.data?.nodeType,
+              name: node.data?.name,
+              streamResponse: node.data?.streamResponse,
+              hasData: !!node.data,
+              fullData: node.data
+            })),
+            hasStreamingAgent
           }
+          console.log('🔍 Test Lab streaming detection:', debugInfo)
+          
+          // Also send this debug info to backend for logging
+          addLog({
+            level: 'debug',
+            message: `🔍 Test Lab streaming detection: hasStreamingAgent=${hasStreamingAgent}, nodeCount=${nodes.length}, agentNodes=${nodes.filter(n => n.type === 'agent').length}`
+          })
+          
+          addLog({
+            level: 'debug',
+            message: `🔍 Agent nodes details: ${JSON.stringify(nodes.filter(n => n.type === 'agent' || n.data?.nodeType === 'agent').map(n => ({id: n.id, type: n.type, nodeType: n.data?.nodeType, streamResponse: n.data?.streamResponse})), null, 2)}`
+          })
+          
+          if (hasStreamingAgent) {
+            addLog({
+              level: 'info',
+              message: '🌊 Streaming enabled - using streaming endpoint for real-time responses'
+            })
+            
+            addLog({
+              level: 'debug',
+              message: `🌊 About to call streaming endpoint: ${apiBase}/chat/workflow/stream`
+            })
+            
+            // Use streaming endpoint
+            const response = await fetch(`${apiBase}/chat/workflow/stream`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                nodes: nodes,
+                connections: edges,
+                input: input,
+                session_id: `canvas_test_${Date.now()}`,
+                conversation_history: conversationHistory.map(msg => ({
+                  role: msg.type === 'user' ? 'user' : 'assistant',
+                  content: msg.content
+                }))
+              })
+            })
+            
+            if (!response.ok) {
+              throw new Error(`Streaming request failed: ${response.status}`)
+            }
+            
+            const reader = response.body?.getReader()
+            const decoder = new TextDecoder()
+            
+            if (reader) {
+              let accumulatedContent = ''
+              
+              // Add initial empty assistant message for real-time streaming
+              const streamingMessage = {
+                type: 'assistant' as const,
+                content: ''
+              }
+              const streamingMessageId = addMessage(streamingMessage)
+              
+              try {
+                while (true) {
+                  const { done, value } = await reader.read()
+                  
+                  if (done) break
+                  
+                  const chunk = decoder.decode(value, { stream: true })
+                  const lines = chunk.split('\n')
+                  
+                  for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                      try {
+                        const data = line.slice(6)
+                        if (data === '[DONE]') continue
+                        
+                        const parsed = JSON.parse(data)
+                        if (parsed.content) {
+                          accumulatedContent += parsed.content
+                          
+                          // Update the streaming message in real-time using its ID
+                          updateMessage(streamingMessageId, { content: accumulatedContent })
+                          
+                          // Log streaming progress for Test Lab  
+                          console.log('🌊 Streaming chunk received:', {
+                            raw: parsed.content,
+                            accumulated: accumulatedContent,
+                            messageId: streamingMessageId
+                          })
+                        }
+                      } catch (e) {
+                        // Skip invalid JSON lines
+                      }
+                    }
+                  }
+                }
+              } finally {
+                reader.releaseLock()
+              }
+              
+              addLog({
+                level: 'success',
+                message: '✅ Streaming response completed'
+              })
+              
+              return // Exit early for streaming
+            }
+          } else {
+            addLog({
+              level: 'info',
+              message: '📦 Non-streaming mode - using regular endpoint'
+            })
+            
+            // Use regular endpoint for non-streaming
+            const response = await fetch(`${apiBase}/chat/workflow`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                nodes: nodes,
+                connections: edges,
+                input: input,
+                session_id: `canvas_test_${Date.now()}`,
+                conversation_history: conversationHistory.map(msg => ({
+                  role: msg.type === 'user' ? 'user' : 'assistant',
+                  content: msg.content
+                }))
+              })
+            })
 
-          const result = await response.json()
+            if (!response.ok) {
+              const errorData = await response.json()
+              throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`)
+            }
+
+            const result = await response.json()
           
           // Log agent information if available
           if (result.workflow_execution?.agent_name) {
@@ -311,6 +477,7 @@ const TestPanel: React.FC = () => {
             content: result.response || 'Agent executed successfully!',
             agentName: result.workflow_execution?.agent_name
           })
+          } // End of non-streaming else block
 
         } catch (apiError) {
           addLog({
@@ -618,7 +785,10 @@ const TestPanel: React.FC = () => {
             />
             <Button
               variant="contained"
-              onClick={handleSendMessage}
+              onClick={() => {
+                console.log('🚨 TEST LAB: Send button clicked!')
+                handleSendMessage()
+              }}
               disabled={isExecuting || !currentInput.trim()}
               sx={{ minWidth: 'auto', px: 2 }}
             >

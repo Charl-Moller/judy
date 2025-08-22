@@ -27,7 +27,9 @@ interface ExecutionContextType {
   isTestPanelOpen: boolean
   startExecution: () => void
   stopExecution: () => void
-  addMessage: (message: Omit<ExecutionMessage, 'id' | 'timestamp'>) => void
+  addMessage: (message: Omit<ExecutionMessage, 'id' | 'timestamp'>) => string
+  updateMessage: (id: string, updates: Partial<Pick<ExecutionMessage, 'content' | 'type'>>) => void
+  getLatestConversationHistory: () => ExecutionMessage[]
   addLog: (log: Omit<ExecutionLog, 'id' | 'timestamp'>) => void
   setCurrentInput: (input: string) => void
   openTestPanel: () => void
@@ -72,6 +74,21 @@ export const ExecutionProvider: React.FC<ExecutionProviderProps> = ({ children }
       timestamp: new Date()
     }
     setConversationHistory(prev => [...prev, newMessage])
+    return newMessage.id
+  }
+  
+  const getLatestConversationHistory = () => {
+    return conversationHistory
+  }
+
+  const updateMessage = (id: string, updates: Partial<Pick<ExecutionMessage, 'content' | 'type'>>) => {
+    setConversationHistory(prev => 
+      prev.map(message => 
+        message.id === id 
+          ? { ...message, ...updates }
+          : message
+      )
+    )
   }
 
   const addLog = (log: Omit<ExecutionLog, 'id' | 'timestamp'>) => {
@@ -108,6 +125,8 @@ export const ExecutionProvider: React.FC<ExecutionProviderProps> = ({ children }
     startExecution,
     stopExecution,
     addMessage,
+    updateMessage,
+    getLatestConversationHistory,
     addLog,
     setCurrentInput,
     openTestPanel,

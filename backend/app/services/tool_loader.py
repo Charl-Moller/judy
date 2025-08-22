@@ -10,20 +10,19 @@ from sqlalchemy.orm import Session
 from ..db import models
 from ..services.tools import ALL_TOOLS, TOOL_METADATA
 from .mcp_manager import MCPManager
+from .cache_service import cache_service
 
+# Global tool registry cache - loaded once and reused
+_GLOBAL_TOOL_REGISTRY = None
+_GLOBAL_MCP_MANAGER = None
 
-class ToolLoader:
-    """Service for dynamically loading and managing tools for agent execution"""
+def _get_global_tool_registry() -> Dict[str, Any]:
+    """Get or initialize the global tool registry (singleton pattern)"""
+    global _GLOBAL_TOOL_REGISTRY
     
-    def __init__(self, db: Session):
-        self.db = db
-        self._tool_registry = {}
-        self._mcp_manager = None
-        self._load_available_tools()
-    
-    def _load_available_tools(self):
-        """Load all available tool functions into registry"""
-        print("🔧 Loading available tools...")
+    if _GLOBAL_TOOL_REGISTRY is None:
+        print("🔧 Initializing global tool registry...")
+        _GLOBAL_TOOL_REGISTRY = {}
         
         # Import tool modules and extract functions
         tool_modules = [
@@ -43,20 +42,37 @@ class ToolLoader:
                 # Get all functions decorated with @tool
                 for name, obj in inspect.getmembers(module, inspect.isfunction):
                     if hasattr(obj, '__name__') and name in ALL_TOOLS:
-                        self._tool_registry[name] = obj
-                        print(f"✅ Loaded tool: {name}")
+                        _GLOBAL_TOOL_REGISTRY[name] = obj
+                        print(f"✅ Cached tool: {name}")
                         
             except Exception as e:
                 print(f"❌ Failed to load module {module_name}: {e}")
         
-        print(f"🔧 Loaded {len(self._tool_registry)} native tools total")
+        print(f"🎯 Global tool registry initialized with {len(_GLOBAL_TOOL_REGISTRY)} tools")
+    
+    return _GLOBAL_TOOL_REGISTRY
+
+
+class ToolLoader:
+    """Service for dynamically loading and managing tools for agent execution"""
+    
+    def __init__(self, db: Session):
+        self.db = db
+        self._tool_registry = _get_global_tool_registry()  # Use global cached registry
+        self._mcp_manager = None
+    
     
     async def initialize_mcp_manager(self):
         """Initialize MCP manager for external tool support"""
-        if self._mcp_manager is None:
-            self._mcp_manager = MCPManager(self.db)
-            await self._mcp_manager.initialize()
-            print("🔗 MCP Manager initialized and connected to external servers")
+        global _GLOBAL_MCP_MANAGER
+        
+        if _GLOBAL_MCP_MANAGER is None:
+            print("🔗 Initializing global MCP Manager...")
+            _GLOBAL_MCP_MANAGER = MCPManager(self.db)
+            await _GLOBAL_MCP_MANAGER.initialize()
+            print("🔗 Global MCP Manager initialized and connected to external servers")
+        
+        self._mcp_manager = _GLOBAL_MCP_MANAGER
     
     async def get_tools_for_agent_node(self, agent_node: Dict[str, Any]) -> Dict[str, Any]:
         """Get tools configured for a specific agent node"""

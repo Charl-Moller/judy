@@ -27,6 +27,7 @@ interface AgentCanvasHeaderProps {
   onExecute?: () => void
   onBack?: () => void
   onOpenTestChat?: () => void
+  onNameChange?: (name: string) => void
 }
 
 const AgentCanvasHeader: React.FC<AgentCanvasHeaderProps> = ({ 
@@ -34,13 +35,16 @@ const AgentCanvasHeader: React.FC<AgentCanvasHeaderProps> = ({
   onSave, 
   onExecute,
   onBack,
-  onOpenTestChat 
+  onOpenTestChat,
+  onNameChange 
 }) => {
   const { reactFlowInstance } = useFlow()
   const { openTestPanel, isExecuting } = useExecution()
   const [nodeCount, setNodeCount] = useState(0)
   const [edgeCount, setEdgeCount] = useState(0)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isEditingName, setIsEditingName] = useState(false)
+  const [tempName, setTempName] = useState(agentName)
 
   // Update counts when instance changes
   useEffect(() => {
@@ -140,9 +144,51 @@ const AgentCanvasHeader: React.FC<AgentCanvasHeaderProps> = ({
   return (
     <AppBar position="static" color="default" elevation={1} sx={{ borderBottom: '1px solid #e0e0e0' }}>
       <Toolbar sx={{ minHeight: '56px !important', px: 2 }}>
-        <Typography variant="h6" sx={{ flexGrow: 0, mr: 3, fontSize: '1.1rem' }}>
-          🤖 {agentName}
-        </Typography>
+        {isEditingName ? (
+          <Box sx={{ display: 'flex', alignItems: 'center', mr: 3 }}>
+            <Typography sx={{ mr: 1 }}>🤖</Typography>
+            <input
+              type="text"
+              value={tempName}
+              onChange={(e) => setTempName(e.target.value)}
+              onBlur={() => {
+                if (onNameChange) onNameChange(tempName)
+                setIsEditingName(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (onNameChange) onNameChange(tempName)
+                  setIsEditingName(false)
+                } else if (e.key === 'Escape') {
+                  setTempName(agentName)
+                  setIsEditingName(false)
+                }
+              }}
+              style={{
+                fontSize: '1.1rem',
+                fontWeight: 600,
+                border: '1px solid #ccc',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                background: 'white',
+                minWidth: '200px'
+              }}
+              autoFocus
+            />
+          </Box>
+        ) : (
+          <Typography 
+            variant="h6" 
+            sx={{ flexGrow: 0, mr: 3, fontSize: '1.1rem', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+            onClick={() => {
+              setTempName(agentName)
+              setIsEditingName(true)
+            }}
+            title="Click to edit workflow name"
+          >
+            🤖 {agentName}
+          </Typography>
+        )}
         
         <Box sx={{ display: 'flex', gap: 1, flexGrow: 1, alignItems: 'center' }}>
           {onBack && (
@@ -214,7 +260,7 @@ const AgentCanvasHeader: React.FC<AgentCanvasHeaderProps> = ({
         {/* Status Indicators */}
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
           <Chip 
-            label={`${nodeCount} components`} 
+            label={`${nodeCount} sub-agents`} 
             size="small" 
             variant="outlined"
             color={nodeCount > 0 ? 'primary' : 'default'}
@@ -230,7 +276,7 @@ const AgentCanvasHeader: React.FC<AgentCanvasHeaderProps> = ({
           
           {/* Agent Status */}
           <Chip 
-            label={nodeCount === 0 ? 'Empty' : edgeCount === 0 ? 'Draft' : 'Configured'}
+            label={nodeCount === 0 ? 'Empty' : edgeCount === 0 ? 'Draft' : 'Ready'}
             size="small"
             color={
               nodeCount === 0 ? 'default' : 

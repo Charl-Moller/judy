@@ -75,7 +75,7 @@ const AgentConfigForm: React.FC<AgentConfigFormProps> = ({ data, updateData }) =
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Typography variant="h6" gutterBottom>
-        Agent Configuration
+        Sub-Agent Configuration
       </Typography>
 
       {/* Basic Information */}
@@ -85,11 +85,11 @@ const AgentConfigForm: React.FC<AgentConfigFormProps> = ({ data, updateData }) =
         </Typography>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <TextField
-            label="Agent Name"
+            label="Sub-Agent Name"
             value={data.name || ''}
             onChange={(e) => handleInputChange('name', e.target.value)}
             fullWidth
-            placeholder="e.g., Customer Service Agent"
+            placeholder="e.g., Customer Service Sub-Agent"
           />
           
           <TextField
@@ -147,7 +147,7 @@ const AgentConfigForm: React.FC<AgentConfigFormProps> = ({ data, updateData }) =
           renderInput={(params) => (
             <TextField
               {...params}
-              label="Agent Capabilities"
+              label="Sub-Agent Capabilities"
               placeholder="Select capabilities"
               helperText="Choose what this agent can do"
             />
@@ -235,7 +235,7 @@ const AgentConfigForm: React.FC<AgentConfigFormProps> = ({ data, updateData }) =
       {/* Configuration Status */}
       {data.name && data.systemPrompt && (
         <Alert severity="success">
-          Agent configuration looks good! This agent is ready to use.
+          Sub-Agent configuration looks good! This sub-agent is ready to use.
         </Alert>
       )}
     </Box>

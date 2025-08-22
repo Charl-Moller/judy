@@ -34,10 +34,10 @@ const nodeTypes: NodeType[] = [
   // Core AI Components
   { 
     type: 'agent', 
-    label: 'Agent', 
+    label: 'Sub-Agent', 
     icon: AgentIcon, 
     color: '#4caf50',
-    description: 'Single-purpose AI agent with basic behavior',
+    description: 'Single-purpose AI sub-agent with basic behavior',
     category: 'Core Components'
   },
   { 
@@ -45,7 +45,7 @@ const nodeTypes: NodeType[] = [
     label: 'Persona Router', 
     icon: PersonaIcon, 
     color: '#e91e63',
-    description: 'Multi-persona agent with intent-based routing',
+    description: 'Multi-persona sub-agent with intent-based routing',
     category: 'Core Components'
   },
   { 
@@ -74,6 +74,14 @@ const nodeTypes: NodeType[] = [
     description: 'External tool or function integration',
     category: 'Memory & Tools'
   },
+  { 
+    type: 'file_processor', 
+    label: 'File Processor', 
+    icon: ToolIcon, 
+    color: '#4caf50',
+    description: 'Universal file attachment processor (images, docs, spreadsheets, etc.)',
+    category: 'Memory & Tools'
+  },
 
   // Advanced Components
   { 
@@ -81,7 +89,7 @@ const nodeTypes: NodeType[] = [
     label: 'Orchestrator', 
     icon: OrchestratorIcon, 
     color: '#673ab7',
-    description: 'Coordinates multiple agents and workflows',
+    description: 'Coordinates multiple sub-agents and workflows',
     category: 'Advanced'
   },
   { 

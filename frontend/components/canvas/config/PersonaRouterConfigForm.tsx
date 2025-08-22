@@ -187,7 +187,7 @@ const PersonaRouterConfigForm: React.FC<PersonaRouterConfigFormProps> = ({ data,
           fullWidth
           multiline
           rows={3}
-          placeholder="You are an intelligent router that analyzes user intent and selects the most appropriate specialist agent..."
+          placeholder="You are an intelligent router that analyzes user intent and selects the most appropriate specialist sub-agent..."
           helperText="Instructions for the persona router itself (used for LLM-based intent detection)"
         />
       </Box>
@@ -249,8 +249,8 @@ const PersonaRouterConfigForm: React.FC<PersonaRouterConfigFormProps> = ({ data,
         {connectedAgents.length === 0 ? (
           <Alert severity="info">
             <Typography variant="body2">
-              <strong>No agents connected.</strong> Connect Agent nodes to this Persona Router 
-              by drawing connections from this router to Agent nodes on the canvas.
+              <strong>No sub-agents connected.</strong> Connect Sub-Agent nodes to this Persona Router 
+              by drawing connections from this router to Sub-Agent nodes on the canvas.
             </Typography>
           </Alert>
         ) : (

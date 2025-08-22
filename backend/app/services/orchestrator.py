@@ -8,6 +8,7 @@ from datetime import datetime
 import re
 import json
 from pathlib import Path
+from .cache_service import keyvault_cache
 
 print("=== ORCHESTRATOR MODULE LOADED ===")
 
@@ -25,7 +26,7 @@ except ImportError:
     print("Warning: azure-keyvault-secrets not installed. Key Vault integration disabled.")
 
 def resolve_azure_keyvault_secret(secret_url: str) -> str:
-    """Resolve Azure Key Vault secret reference"""
+    """Resolve Azure Key Vault secret reference with caching"""
     if not AZURE_KEYVAULT_AVAILABLE:
         raise Exception("Azure Key Vault integration not available")
     
@@ -33,41 +34,8 @@ def resolve_azure_keyvault_secret(secret_url: str) -> str:
         print(f"=== AZURE KEY VAULT DEBUG ===")
         print(f"Attempting to resolve secret: {secret_url}")
         
-        # Parse the secret URL: https://vault-name.vault.azure.net/secrets/secret-name/version
-        # Extract vault name and secret name
-        match = re.match(r'https://([^.]+)\.vault\.azure\.net/secrets/([^/]+)(?:/([^/]+))?', secret_url)
-        if not match:
-            raise Exception(f"Invalid Key Vault secret URL format: {secret_url}")
-        
-        vault_name = match.group(1)
-        secret_name = match.group(2)
-        secret_version = match.group(3)  # Optional
-        
-        print(f"Parsed vault_name: {vault_name}")
-        print(f"Parsed secret_name: {secret_name}")
-        print(f"Parsed secret_version: {secret_version}")
-        
-        # Create Key Vault client
-        print(f"Creating Azure credential...")
-        credential = DefaultAzureCredential()
-        print(f"Credential created: {type(credential)}")
-        
-        vault_url = f"https://{vault_name}.vault.azure.net/"
-        print(f"Vault URL: {vault_url}")
-        
-        print(f"Creating SecretClient...")
-        client = SecretClient(vault_url=vault_url, credential=credential)
-        print(f"SecretClient created successfully")
-        
-        # Get the secret
-        print(f"Retrieving secret '{secret_name}'...")
-        if secret_version:
-            secret = client.get_secret(secret_name, version=secret_version)
-        else:
-            secret = client.get_secret(secret_name)
-        
-        print(f"Secret retrieved successfully")
-        return secret.value
+        # Use cached secret resolution
+        return keyvault_cache.get_secret_sync(secret_url)
         
     except Exception as e:
         print(f"=== AZURE KEY VAULT ERROR ===")

@@ -20,6 +20,7 @@ const TestChatPanel = ({ currentAgent, onClose }: { currentAgent: any; onClose: 
     startExecution,
     stopExecution,
     addMessage,
+    updateMessage,
     addLog,
     clearHistory
   } = useExecution()
@@ -98,41 +99,174 @@ const TestChatPanel = ({ currentAgent, onClose }: { currentAgent: any; onClose: 
         })
 
         try {
-          const response = await fetch(`${apiBase}/chat/workflow`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              nodes: nodes,
-              connections: edges,
-              input: input,
-              session_id: `agent_builder_test_${Date.now()}`,
-              conversation_history: conversationHistory.map(msg => ({
-                role: msg.type === 'user' ? 'user' : 'assistant',
-                content: msg.content
-              }))
+          // Check if any agent node has streaming enabled
+          const hasStreamingAgent = nodes.some((node: any) => 
+            (node.type === 'agent' || node.data?.nodeType === 'agent') && node.data?.streamResponse === true
+          )
+          
+          // Detailed streaming detection debugging
+          const agentNodes = nodes.filter((node: any) => node.type === 'agent' || node.data?.nodeType === 'agent')
+          console.log('🔍 Agent Builder streaming detection - DETAILED:', {
+            hasStreamingAgent,
+            nodeCount: nodes.length,
+            agentNodeCount: agentNodes.length,
+            agentNodes: agentNodes
+          })
+          
+          // Log each agent node individually for detailed inspection
+          agentNodes.forEach((node: any, index: number) => {
+            console.log(`🤖 Agent Node ${index + 1}:`, {
+              id: node.id,
+              type: node.type,
+              nodeType: node.data?.nodeType,
+              streamResponse: node.data?.streamResponse,
+              hasStreamResponse: 'streamResponse' in (node.data || {}),
+              streamResponseValue: node.data?.streamResponse,
+              streamResponseType: typeof node.data?.streamResponse,
+              fullData: node.data
             })
           })
-
-          if (!response.ok) {
-            const errorData = await response.json()
-            throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`)
-          }
-
-          const result = await response.json()
           
           addLog({
-            level: 'info',
-            message: '✅ API execution completed successfully'
+            level: 'debug',
+            message: `🔍 Agent Builder streaming detection: hasStreamingAgent=${hasStreamingAgent}`
           })
+          
+          if (hasStreamingAgent) {
+            addLog({
+              level: 'info',
+              message: '🌊 Streaming enabled - using streaming endpoint for real-time responses'
+            })
+            
+            console.log('🌊 CALLING STREAMING ENDPOINT:', `${apiBase}/chat/workflow/stream`)
+            
+            // Use streaming endpoint for real-time responses
+            const response = await fetch(`${apiBase}/chat/workflow/stream`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                nodes: nodes,
+                connections: edges,
+                input: input,
+                session_id: `agent_builder_test_${Date.now()}`,
+                conversation_history: conversationHistory.map(msg => ({
+                  role: msg.type === 'user' ? 'user' : 'assistant',
+                  content: msg.content
+                }))
+              })
+            })
+            
+            if (!response.ok) throw new Error('Streaming request failed')
+            
+            const reader = response.body?.getReader()
+            const decoder = new TextDecoder()
+            
+            if (reader) {
+              let accumulatedContent = ''
+              
+              // Add initial empty assistant message for real-time streaming
+              const streamingMessage = {
+                type: 'assistant' as const,
+                content: ''
+              }
+              const streamingMessageId = addMessage(streamingMessage)
+              
+              try {
+                while (true) {
+                  const { done, value } = await reader.read()
+                  
+                  if (done) break
+                  
+                  const chunk = decoder.decode(value, { stream: true })
+                  const lines = chunk.split('\n')
+                  
+                  for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                      try {
+                        const data = line.slice(6)
+                        if (data === '[DONE]') continue
+                        
+                        const parsed = JSON.parse(data)
+                        if (parsed.content) {
+                          accumulatedContent += parsed.content
+                          
+                          // Update the streaming message in real-time
+                          updateMessage(streamingMessageId, { content: accumulatedContent })
+                          
+                          // Force UI update - debug streaming display
+                          console.log('🔄 UI should update with:', accumulatedContent.substring(0, 50) + '...')
+                          
+                          // Small delay to make streaming visible
+                          await new Promise(resolve => setTimeout(resolve, 10))
+                        }
+                      } catch (e) {
+                        // Skip invalid JSON lines
+                      }
+                    }
+                  }
+                }
+              } finally {
+                reader.releaseLock()
+              }
+              
+              addLog({
+                level: 'info',
+                message: '✅ Streaming response completed'
+              })
+              
+              return // Exit early for streaming
+            }
+          } else {
+            addLog({
+              level: 'info',
+              message: '📦 Non-streaming mode - using regular endpoint'
+            })
+            
+            console.log('📦 CALLING NON-STREAMING ENDPOINT:', `${apiBase}/chat/workflow`)
+            
+            // Use regular endpoint for non-streaming
+            const response = await fetch(`${apiBase}/chat/workflow`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                nodes: nodes,
+                connections: edges,
+                input: input,
+                session_id: `agent_builder_test_${Date.now()}`,
+                conversation_history: conversationHistory.map(msg => ({
+                  role: msg.type === 'user' ? 'user' : 'assistant',
+                  content: msg.content
+                }))
+              })
+            })
 
-          // Add assistant response
-          addMessage({
-            type: 'assistant',
-            content: result.response || 'Agent executed successfully!',
-            agentName: result.workflow_execution?.agent_name
-          })
+            if (!response.ok) {
+              let errorMessage = `HTTP ${response.status}: ${response.statusText}`
+              try {
+                const errorData = await response.json()
+                errorMessage = errorData.detail || errorData.message || errorMessage
+              } catch (parseError) {
+                // If we can't parse the error, use the status text
+              }
+              throw new Error(errorMessage)
+            }
+
+            const result = await response.json()
+            
+            addLog({
+              level: 'info',
+              message: '✅ API execution completed successfully'
+            })
+
+            // Add assistant response
+            addMessage({
+              type: 'assistant',
+              content: result.response || 'Agent executed successfully!',
+              agentName: result.workflow_execution?.agent_name
+            })
+          } // End of else block for non-streaming
 
         } catch (apiError) {
           addLog({
@@ -140,11 +274,30 @@ const TestChatPanel = ({ currentAgent, onClose }: { currentAgent: any; onClose: 
             message: `❌ API execution failed: ${apiError}`
           })
 
-          // Add simulated response as fallback
+          // Add detailed error guidance
+          const errorMsg = apiError.message || apiError.toString()
           addMessage({
-            type: 'assistant',
-            content: `I processed your request: "${input}". This is a simulated response since the API is not available.`
+            type: 'error',
+            content: `❌ Workflow execution failed: ${errorMsg}`
           })
+          
+          // Add specific guidance based on error type
+          if (errorMsg.includes('Missing API key') || errorMsg.includes('No LLM client available')) {
+            addMessage({
+              type: 'system',
+              content: `🔧 Configuration needed: Your workflow requires LLM setup.\n\n📋 Quick fix:\n1. Click the LLM node in your workflow\n2. Configure Provider, Model, API Base, and API Key\n3. Or try a simpler Agent→LLM workflow`
+            })
+          } else if (errorMsg.includes('Persona router') || errorMsg.includes('No agents connected')) {
+            addMessage({
+              type: 'system', 
+              content: `🎭 Persona Router requires connected sub-agents and LLM configuration.\n\n📋 For easier testing, try creating a workflow with just Agent→LLM nodes.`
+            })
+          } else if (errorMsg.includes('No LLM node connected')) {
+            addMessage({
+              type: 'system',
+              content: `🔗 Missing connection: Your agent needs an LLM.\n\n📋 Solution: Add an LLM node and connect it to your Agent.`
+            })
+          }
         }
       } else {
         // Simulated response
@@ -869,7 +1022,7 @@ export default function AgentBuilderPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">🤖 Agent Builder</h1>
           <p className="mt-2 text-gray-600">
-            Design and orchestrate AI agents with a visual drag-and-drop editor
+            Design and orchestrate AI agents with sub-agents using a visual drag-and-drop editor
           </p>
         </div>
         <div className="flex items-center space-x-3">
@@ -950,7 +1103,7 @@ export default function AgentBuilderPage() {
           <div className="text-3xl font-bold text-purple-600">
             {isLoading ? '...' : savedAgents.reduce((total, a) => total + a.nodes.length, 0)}
           </div>
-          <div className="text-sm text-gray-600">Total Components</div>
+          <div className="text-sm text-gray-600">Total Sub-Agents</div>
         </motion.div>
         <motion.div 
           className="card p-6 text-center"
@@ -990,7 +1143,7 @@ export default function AgentBuilderPage() {
             <p className="text-gray-600 mb-6">
               {searchTerm || filterTag 
                 ? 'Try adjusting your search or filter criteria'
-                : 'Create your first AI agent to start building intelligent workflows'
+                : 'Create your first AI agent with sub-agents to start building intelligent systems'
               }
             </p>
             {!searchTerm && !filterTag && (
@@ -1129,7 +1282,7 @@ export default function AgentBuilderPage() {
                 {/* Agent Stats */}
                 <div className="space-y-2 text-sm text-gray-600 mb-4">
                   <div className="flex justify-between">
-                    <span>Components:</span>
+                    <span>Sub-Agents:</span>
                     <span className="font-medium">{agent.nodes.length}</span>
                   </div>
                   <div className="flex justify-between">
@@ -1142,9 +1295,9 @@ export default function AgentBuilderPage() {
                     <>
                       {agent.nodes.find((n: any) => n.type === 'agent') && (
                         <div className="flex justify-between">
-                          <span>Agent Core:</span>
+                          <span>Main Sub-Agent:</span>
                           <span className="font-medium text-blue-600">
-                            {agent.nodes.find((n: any) => n.type === 'agent')?.data?.name || 'AI Agent'}
+                            {agent.nodes.find((n: any) => n.type === 'agent')?.data?.name || 'AI Sub-Agent'}
                           </span>
                         </div>
                       )}

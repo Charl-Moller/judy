@@ -38,7 +38,8 @@ const nodeTypes = {
   memory: AgentNode,
   trigger: AgentNode,
   output: AgentNode,
-  orchestrator: AgentNode
+  orchestrator: AgentNode,
+  file_processor: AgentNode
 }
 
 const edgeTypes = {
@@ -65,6 +66,7 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, on
   const [nodes, setNodes, onNodesChange]: [Node[], (nodes: Node[]) => void, OnNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange]: [Edge[], (edges: Edge[]) => void, OnEdgesChange] = useEdgesState([])
   const [zoomLevel, setZoomLevel] = useState<number>(100)
+  const [agentName, setAgentName] = useState<string>(initialAgent?.name || 'New Agent')
 
   // Load initial agent data
   useEffect(() => {
@@ -98,6 +100,11 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, on
 
       setNodes(flowNodes)
       setEdges(flowEdges)
+      
+      // Update agent name state if initialAgent has a name
+      if (initialAgent.name) {
+        setAgentName(initialAgent.name)
+      }
 
       // Set default zoom to 100% after a short delay
       setTimeout(() => {
@@ -250,6 +257,21 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, on
               routing: 'round_robin',
               timeout: 30000
             }
+          case 'file_processor':
+            return {
+              ...baseData,
+              name: 'File Processor',
+              description: 'Universal file attachment processor for images, documents, spreadsheets, and more',
+              supportedTypes: [
+                'image/*', 'application/pdf', 'text/csv', 
+                'application/vnd.ms-excel', 
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'text/plain', 'application/json'
+              ],
+              autoProcess: true,
+              extractText: true,
+              extractStructuredData: true
+            }
           default:
             return baseData
         }
@@ -278,9 +300,10 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, on
     const currentNodes = reactFlowInstance.getNodes()
     const currentEdges = reactFlowInstance.getEdges()
 
-    // Convert back to workflow format
+    // Convert back to agent format
     const agentData = {
       ...(initialAgent || {}),
+      name: agentName,
       nodes: currentNodes.map(node => ({
         id: node.id,
         type: node.data?.nodeType || node.type,
@@ -301,7 +324,6 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, on
         dataType: edge.data?.dataType || 'any'
       })),
       // Update metadata
-      name: initialAgent?.name || 'Untitled Agent',
       description: initialAgent?.description || 'Agent description',
       updated_at: new Date().toISOString()
     }
@@ -352,11 +374,12 @@ const FlowContent: React.FC<AgentCanvasProps> = ({ onSave, onExecute, onBack, on
       overflow: 'hidden'
     }}>
       <AgentCanvasHeader 
-        agentName={initialAgent?.name || 'New Agent'}
+        agentName={agentName}
         onSave={handleSave}
         onExecute={handleExecute}
         onBack={onBack}
         onOpenTestChat={onOpenTestChat}
+        onNameChange={(name) => setAgentName(name)}
       />
       <Box sx={{ 
         display: 'flex', 

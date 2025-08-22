@@ -6,6 +6,7 @@ from ..db import models
 from ..schemas.chat import ChatRequest, ChatResponse
 from ..services.orchestrator import run_agent, run_orchestrator_agent
 from ..services.tool_loader import create_tool_loader, get_tools_description_for_llm
+from ..services.shared_memory import shared_memory_service
 import json
 import asyncio
 import uuid
@@ -13,7 +14,7 @@ import uuid
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
 @router.post("/workflow")
-async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
+async def execute_workflow(payload: dict, auto_stream: bool = False, db: Session = Depends(get_db)):
     """
     Execute a workflow defined in the visual editor
     Payload should contain:
@@ -22,6 +23,7 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
     - input: user input message
     - session_id: optional session identifier
     - conversation_history: optional list of previous messages
+    - files: optional list of file IDs to process
     """
     try:
         nodes = payload.get("nodes", [])
@@ -29,12 +31,44 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
         user_input = payload.get("input", "")
         session_id = payload.get("session_id", str(uuid.uuid4()))
         conversation_history = payload.get("conversation_history", [])
+        attached_files = payload.get("files", [])
         
         if not nodes:
             raise HTTPException(status_code=400, detail="No nodes provided in workflow")
         
         if not user_input:
             raise HTTPException(status_code=400, detail="No input provided")
+        
+        # Process attached files and make them universally available
+        file_context = {}
+        if attached_files:
+            print(f"\n📎 WORKFLOW: Processing {len(attached_files)} attached file(s)")
+            from ..services.file_processor import file_processor
+            
+            # Get file information from database
+            files_data = []
+            for file_id in attached_files:
+                try:
+                    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+                    if file_record:
+                        files_data.append({
+                            "id": str(file_record.id),
+                            "filename": file_record.filename,
+                            "url": file_record.url,
+                            "path": file_record.url,  # For compatibility
+                            "content_type": file_record.content_type,
+                            "size": file_record.size
+                        })
+                        print(f"📄 Found file: {file_record.filename}")
+                    else:
+                        print(f"❌ File not found in database: {file_id}")
+                except Exception as e:
+                    print(f"❌ Error retrieving file {file_id}: {e}")
+            
+            # Process all files through universal file processor
+            if files_data:
+                file_context = file_processor.process_files_for_workflow(files_data)
+                print(f"✅ WORKFLOW: File processing complete - {file_context['file_count']} files ready")
         
         # Find the starting point - prioritize persona_router over regular agents
         agent_node = None
@@ -98,7 +132,7 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
                 if llm_node_for_router:
                     router_config["_llm_node"] = llm_node_for_router  # Pass LLM node for intelligent routing
                 
-                routing_result = route_to_agent(user_input, router_config, connected_agents, nodes, connections)
+                routing_result = route_to_agent(user_input, router_config, connected_agents, nodes, connections, session_id)
                 selected_agent = routing_result["agent"]
                 
                 print("\n" + "="*60)
@@ -206,6 +240,13 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
         # Always provide conversation context to the agent (built-in feature)
         prev_output = {"attachments": [], "response": ""}
         
+        # Add file context to make attachments universally available to all agents/sub-agents/tools
+        if file_context.get("files_available"):
+            prev_output["file_context"] = file_context["file_context"]
+            prev_output["attached_files"] = file_context["file_summaries"]
+            prev_output["structured_file_data"] = file_context["structured_data"]
+            print(f"📎 WORKFLOW: File context added to agent execution ({len(file_context['file_context'])} chars)")
+        
         print("\n" + "="*50)
         print("🔧 WORKFLOW CONFIGURATION")
         print("="*50)
@@ -268,11 +309,46 @@ async def execute_workflow(payload: dict, db: Session = Depends(get_db)):
             print(f"\n🔧 TOOL LOADING")
             print(f"   • No tools configured for this workflow")
         
-        # Execute the agent using existing infrastructure
+        # Check if any agent in the workflow is configured for streaming
+        should_stream = False
+        streaming_agent_name = None
+        
+        if persona_router_node:
+            # Check if the selected agent has streaming enabled
+            selected_agent_node = routing_result["agent"]
+            stream_enabled = selected_agent_node.get('data', {}).get('streamResponse', False)
+            if stream_enabled:
+                should_stream = True
+                streaming_agent_name = selected_agent_node.get('data', {}).get('name', 'Unknown')
+                print(f"⚡ WORKFLOW: Selected agent '{streaming_agent_name}' has streaming ENABLED")
+            else:
+                print(f"🔄 WORKFLOW: Selected agent '{selected_agent_node.get('data', {}).get('name', 'Unknown')}' has streaming disabled")
+        else:
+            # Check if the primary agent has streaming enabled
+            stream_enabled = primary_node.get('data', {}).get('streamResponse', False)
+            if stream_enabled:
+                should_stream = True
+                streaming_agent_name = primary_node.get('data', {}).get('name', 'Unknown')
+                print(f"⚡ WORKFLOW: Agent '{streaming_agent_name}' has streaming ENABLED")
+            else:
+                print(f"🔄 WORKFLOW: Agent '{primary_node.get('data', {}).get('name', 'Unknown')}' has streaming disabled")
+        
+        if should_stream and auto_stream:
+            print(f"🌊 WORKFLOW: Auto-streaming enabled - redirecting to streaming execution for agent '{streaming_agent_name}'")
+            # Return a special response indicating that streaming should be used
+            return {
+                "stream_required": True,
+                "agent_name": streaming_agent_name,
+                "message": "This agent is configured for streaming. Please use the /chat/workflow/stream endpoint for real-time responses."
+            }
+        elif should_stream:
+            print(f"⚡ WORKFLOW: Agent '{streaming_agent_name}' supports streaming, but auto_stream=False - executing normally")
+        
+        # Execute the agent using existing infrastructure (non-streaming)
         from ..services.orchestrator import execute_single_agent
         
         print("\n" + "="*50)
-        print("🚀 EXECUTING AGENT")
+        print("🚀 EXECUTING AGENT (NON-STREAMING)")
         print("="*50)
         print(f"🤖 Agent: '{temp_agent.name}'")
         print(f"💬 User Input: {user_input[:100]}{'...' if len(user_input) > 100 else ''}")
@@ -327,6 +403,33 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
         user_input = payload.get("input", "")
         session_id = payload.get("session_id", str(uuid.uuid4()))
         conversation_history = payload.get("conversation_history", [])
+        attached_files = payload.get("files", [])
+        
+        # Process attached files (same logic as non-streaming)
+        file_context = {}
+        if attached_files:
+            print(f"\n📎 WORKFLOW STREAM: Processing {len(attached_files)} attached file(s)")
+            from ..services.file_processor import file_processor
+            
+            files_data = []
+            for file_id in attached_files:
+                try:
+                    file_record = db.query(models.File).filter(models.File.id == file_id).first()
+                    if file_record:
+                        files_data.append({
+                            "id": str(file_record.id),
+                            "filename": file_record.filename,
+                            "url": file_record.url,
+                            "path": file_record.url,
+                            "content_type": file_record.content_type,
+                            "size": file_record.size
+                        })
+                except Exception as e:
+                    print(f"❌ Error retrieving file {file_id}: {e}")
+            
+            if files_data:
+                file_context = file_processor.process_files_for_workflow(files_data)
+                print(f"✅ WORKFLOW STREAM: File processing complete - {file_context['file_count']} files ready")
         
         if not nodes:
             raise HTTPException(status_code=400, detail="No nodes provided in workflow")
@@ -396,7 +499,7 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
                 if llm_node_for_router:
                     router_config["_llm_node"] = llm_node_for_router  # Pass LLM node for intelligent routing
                 
-                routing_result = route_to_agent(user_input, router_config, connected_agents, nodes, connections)
+                routing_result = route_to_agent(user_input, router_config, connected_agents, nodes, connections, session_id)
                 selected_agent = routing_result["agent"]
                 
                 # Create a temporary agent using the selected agent's configuration
@@ -466,13 +569,25 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
                 status=models.AgentStatus.active
             )
         
-        # Create LLM config - check for saved config first
+        # Create LLM config - check for saved config first (STREAMING VERSION)
         saved_config_id = llm_node.get("data", {}).get("savedConfigId")
         if saved_config_id:
             # Use saved LLM config from database
-            temp_llm_config = db.query(models.LLMConfig).filter(models.LLMConfig.id == saved_config_id).first()
-            if not temp_llm_config:
+            db_llm_config = db.query(models.LLMConfig).filter(models.LLMConfig.id == saved_config_id).first()
+            if not db_llm_config:
                 raise HTTPException(status_code=400, detail=f"Saved LLM config {saved_config_id} not found")
+            
+            # Create a detached copy to avoid session issues in streaming
+            temp_llm_config = models.LLMConfig(
+                id=db_llm_config.id,
+                provider=db_llm_config.provider,
+                model_name=db_llm_config.model_name,
+                temperature=db_llm_config.temperature,
+                max_tokens=db_llm_config.max_tokens,
+                api_base=db_llm_config.api_base,
+                api_key_secret_ref=db_llm_config.api_key_secret_ref
+            )
+            print(f"🔧 STREAMING: Created detached LLM config copy: {temp_llm_config.model_name}")
         else:
             # Create a temporary LLM config from the workflow node data
             temp_llm_config = models.LLMConfig(
@@ -490,18 +605,77 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
         
         # Always provide conversation context (agent-level memory)
         prev_output = {"attachments": [], "response": ""}
-        if conversation_history:
-            # Get agent's conversation memory settings (defaults if not configured)
+        
+        # Add file context to make attachments universally available (streaming)
+        if file_context.get("files_available"):
+            prev_output["file_context"] = file_context["file_context"]
+            prev_output["attached_files"] = file_context["file_summaries"]
+            prev_output["structured_file_data"] = file_context["structured_data"]
+            print(f"📎 WORKFLOW STREAM: File context added to agent execution")
+        
+        # Use conversation history with priority to payload over shared session memory
+        if session_id and conversation_history:
+            # Frontend provides authoritative conversation history - use it first
+            max_conversations = agent_node.get("data", {}).get("maxConversations", 50)
+            include_system = agent_node.get("data", {}).get("includeSystemMessages", True)
+            
+            limited_history = conversation_history[-max_conversations:] if conversation_history else []
+            
+            if limited_history:
+                prev_output["conversation_history"] = limited_history
+                prev_output["include_system_messages"] = include_system
+                prev_output["memory_strategy"] = "payload_priority"
+                print(f"📚 Using payload conversation history (frontend priority): {len(limited_history)} messages")
+            else:
+                print(f"📝 No payload conversation history provided")
+        elif session_id:
+            # Fallback to shared session memory only if no payload conversation history
+            max_conversations = agent_node.get("data", {}).get("maxConversations", 50)
+            include_system = agent_node.get("data", {}).get("includeSystemMessages", True)
+            
+            # Get shared context from session
+            shared_context = shared_memory_service.get_context_for_agent_handoff(db, session_id)
+            shared_conversation_history = shared_context["conversation_history"]
+            
+            # Apply agent's memory limits to shared history
+            limited_shared_history = shared_conversation_history[-max_conversations:] if shared_conversation_history else []
+            
+            if limited_shared_history:
+                prev_output["conversation_history"] = limited_shared_history
+                prev_output["include_system_messages"] = include_system
+                prev_output["memory_strategy"] = "shared_session"
+                prev_output["session_context"] = {
+                    "current_task": shared_context["current_task"],
+                    "session_facts": shared_context["session_facts"],
+                    "global_context": shared_context["global_context"]
+                }
+                print(f"📚 Using shared session memory: {len(limited_shared_history)} messages from session")
+            elif conversation_history:
+                # Fallback to payload conversation history if shared session is empty
+                max_conversations = agent_node.get("data", {}).get("maxConversations", 10)
+                limited_history = conversation_history[-max_conversations:] if conversation_history else []
+                
+                if limited_history:
+                    prev_output["conversation_history"] = limited_history
+                    prev_output["include_system_messages"] = include_system
+                    prev_output["memory_strategy"] = "payload_fallback"
+                    print(f"📚 Using payload conversation history as fallback: {len(limited_history)} messages")
+                else:
+                    print(f"📝 No conversation history available (shared session empty and no payload history)")
+            else:
+                print(f"📝 No shared session history found for session: {session_id}")
+        elif conversation_history:
+            # Fallback to traditional conversation history if no session_id
             max_conversations = agent_node.get("data", {}).get("maxConversations", 10)
             include_system = agent_node.get("data", {}).get("includeSystemMessages", True)
             
-            # Limit conversation history based on agent configuration
             limited_history = conversation_history[-max_conversations:] if conversation_history else []
             
             if limited_history:
                 prev_output["conversation_history"] = limited_history
                 prev_output["include_system_messages"] = include_system
                 prev_output["memory_strategy"] = "sliding_window"
+                print(f"📚 Using traditional conversation history: {len(limited_history)} messages")
         
         # Load tools for the workflow (streaming)
         tool_loader = create_tool_loader(db)
@@ -519,7 +693,36 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
             print(f"   • No tools configured for this workflow")
         
         async def generate_stream():
+            full_response = ""  # Collect full response for shared memory saving
+            selected_agent_id = None
+            selected_agent_name = None
+            
             try:
+                # Record agent handoff if using persona router
+                if persona_router_node and session_id:
+                    selected_agent_id = str(temp_agent.id)
+                    selected_agent_name = temp_agent.name
+                    
+                    # Save user message to shared memory first
+                    shared_memory_service.add_message_to_shared_context(
+                        db=db,
+                        session_id=session_id,
+                        role="user",
+                        content=user_input,
+                        agent_id=selected_agent_id,
+                        agent_name=selected_agent_name
+                    )
+                    
+                    # Record agent handoff in shared memory
+                    shared_memory_service.record_agent_handoff(
+                        db=db,
+                        session_id=session_id,
+                        to_agent_id=selected_agent_id,
+                        to_agent_name=selected_agent_name,
+                        handoff_reason=f"Persona router selected for input: '{user_input[:50]}{'...' if len(user_input) > 50 else ''}'",
+                        context_summary=f"User requesting: {user_input[:100]}{'...' if len(user_input) > 100 else ''}"
+                    )
+                
                 # Send agent information at the start of the stream if persona router was used
                 if persona_router_node:
                     agent_info = {
@@ -535,10 +738,22 @@ async def execute_workflow_stream(payload: dict, db: Session = Depends(get_db)):
                 async for chunk in execute_single_agent_stream(
                     agent=temp_agent,
                     message=user_input,
-                    files=[],
+                    files=attached_files,
                     prev_output=prev_output
                 ):
+                    full_response += chunk  # Accumulate response
                     yield f"data: {json.dumps({'content': chunk})}\n\n"
+                
+                # Save assistant response to shared memory
+                if session_id and full_response:
+                    shared_memory_service.add_message_to_shared_context(
+                        db=db,
+                        session_id=session_id,
+                        role="assistant",
+                        content=full_response,
+                        agent_id=selected_agent_id,
+                        agent_name=selected_agent_name
+                    )
                 
                 # Send completion signal with agent info
                 completion_data = {'done': True}

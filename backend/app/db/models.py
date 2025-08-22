@@ -133,6 +133,65 @@ class Message(Base):
     content = Column(Text, nullable=False)
     attachments = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Multi-agent memory support
+    agent_id = Column(UUID(as_uuid=True), nullable=True)  # Which agent handled this message
+    agent_name = Column(String, nullable=True)  # Agent name for easier querying
+    shared_session_id = Column(UUID(as_uuid=True), ForeignKey("shared_sessions.id"), nullable=True)
+
+
+class SharedSession(Base):
+    """Session-level memory management for multi-agent conversations"""
+    __tablename__ = "shared_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(String, nullable=False, unique=True)  # Frontend session identifier
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Session-level context
+    current_task = Column(Text, nullable=True)  # What the user is currently trying to achieve
+    session_facts = Column(JSON, default=list)  # Key facts accumulated during conversation
+    global_context = Column(JSON, default=dict)  # Shared context available to all agents
+    
+    # Agent routing history
+    agent_routing_history = Column(JSON, default=list)  # History of agent selections
+    current_agent_id = Column(UUID(as_uuid=True), nullable=True)  # Currently active agent
+    
+    # Memory configuration
+    memory_strategy = Column(String, default="shared")  # "shared", "isolated", "selective"
+    max_context_length = Column(Integer, default=50)  # Maximum conversation turns to maintain
+    preserve_context_on_agent_switch = Column(Boolean, default=True)
+
+
+class AgentHandoff(Base):
+    """Track context handoffs between agents"""
+    __tablename__ = "agent_handoffs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shared_session_id = Column(UUID(as_uuid=True), ForeignKey("shared_sessions.id"), nullable=False)
+    from_agent_id = Column(UUID(as_uuid=True), nullable=True)
+    from_agent_name = Column(String, nullable=True)
+    to_agent_id = Column(UUID(as_uuid=True), nullable=True)
+    to_agent_name = Column(String, nullable=True)
+    handoff_reason = Column(Text, nullable=True)  # Why the handoff occurred
+    context_summary = Column(Text, nullable=True)  # Summary of what was accomplished
+    preserved_context = Column(JSON, default=dict)  # Context passed to next agent
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PersonaRouterMemory(Base):
+    """Memory specifically for persona router decisions and learning"""
+    __tablename__ = "persona_router_memory"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shared_session_id = Column(UUID(as_uuid=True), ForeignKey("shared_sessions.id"), nullable=False)
+    routing_decisions = Column(JSON, default=list)  # History of routing decisions with outcomes
+    user_preferences = Column(JSON, default=dict)  # Learned user preferences for routing
+    task_history = Column(JSON, default=list)  # History of tasks and which agents handled them
+    agent_performance_tracking = Column(JSON, default=dict)  # Track which agents work best for which tasks
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class AgentPipeline(Base):
